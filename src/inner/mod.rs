@@ -10,7 +10,7 @@ pub struct CachePadded<T>(T);
 type Slot<T> = UnsafeCell<MaybeUninit<T>>;
 
 struct SequencedSlot<T> {
-    seq: CachePadded<AtomicUsize>,
+    seq: AtomicUsize,
     data: UnsafeCell<MaybeUninit<T>>,
 }
 
@@ -38,7 +38,7 @@ fn alloc_sequenced_slots<T>(size: usize) -> Box<[SequencedSlot<T>]> {
 
     // Initially, a slot's sequence is its index.
     for i in 0..size {
-        data[i].seq = CachePadded(AtomicUsize::new(i));
+        data[i].seq = AtomicUsize::new(i);
     }
 
     data.into_boxed_slice()
