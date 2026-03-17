@@ -102,7 +102,7 @@ fn new_spsc<T>(cap_pow: u8) -> (SpscConsumer<T>, SpscProducer<T>) {
     };
 
     let p = SpscProducer {
-        inner: inner.clone(),
+        inner: inner,
         head_cache: 0,
     };
 
