@@ -36,6 +36,26 @@ impl<T> SpscInner<T> {
     }
 }
 
+impl<T> Drop for SpscInner<T> {
+    fn drop(&mut self) {
+        // SAFETY: here we know that we are the only threads accessing this
+        // since all references are dropped before this is called.
+        // The standard library also uses Odrdering::Realease to decerement
+        // the Arc counter, then an Ordering::Acquire fence after the last
+        // decrement so we can safely load here with Ordering::Relaxed.
+        let h = self.head.0.load(Ordering::Relaxed);
+        let t = self.tail.0.load(Ordering::Relaxed);
+
+        for i in 0..t.wrapping_sub(h) {
+            let idx = h.wrapping_add(i);
+
+            unsafe {
+                (*self.buf[self.mask(idx)].get()).assume_init_drop();
+            }
+        }
+    }
+}
+
 struct SpscProducer<T> {
     inner: Arc<SpscInner<T>>,
     // The consumer writes to the head. Doing an atomic load every time would
