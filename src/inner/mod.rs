@@ -1,5 +1,6 @@
 use std::{cell::UnsafeCell, mem::MaybeUninit, sync::atomic::AtomicUsize};
 
+pub mod backoff;
 pub mod mpmc;
 pub mod spsc;
 
