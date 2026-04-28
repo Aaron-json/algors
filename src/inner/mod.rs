@@ -44,10 +44,3 @@ fn alloc_sequenced_slots<T>(size: usize) -> Box<[SequencedSlot<T>]> {
 
     data.into_boxed_slice()
 }
-
-#[derive(Debug)]
-enum LuxError<T> {
-    BufferEmpty,
-    // When we cannot push, we return the value to avoid dropping it.
-    BufferFull(T),
-}
