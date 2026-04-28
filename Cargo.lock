@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "lux"
+name = "algors-queue"
 version = "0.1.0"
