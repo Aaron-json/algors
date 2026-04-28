@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use crate::inner::{CachePadded, SequencedSlot, alloc_sequenced_slots};
+use crate::inner::{CachePadded, SequencedSlot, alloc_sequenced_slots, backoff::Backoff};
 
 // Used to implement a Multi-producer Multi-consumer queue. The design
 // implements Dmitry vyukov's MPMC Queue ideas.
@@ -58,6 +58,7 @@ struct MpmcProducer<T> {
 impl<T> MpmcProducer<T> {
     fn try_push(&self, val: T) -> Result<(), T> {
         let inner = &self.inner;
+        let mut backoff = Backoff::new();
 
         let mut idx = inner.tail.0.load(Ordering::Relaxed);
 
@@ -76,32 +77,29 @@ impl<T> MpmcProducer<T> {
                     // we sucessfully claimed the slot
                     Ok(_) => unsafe {
                         (*slot.data.get()).write(val);
-                        // update to t + 1 to signal consumers this slot is ready
-                        // for reading
+                        // update to t + 1 to signal consumers this slot is
+                        // ready for reading
                         slot.seq.store(idx + 1, Ordering::Release);
                         return Ok(());
                     },
                     Err(new_idx) => {
-                        // Another producer won the CAS and updated it before us.
-                        // Advance to the new tail and try again
+                        // Another producer won the CAS and updated it before
+                        // us. Advance to the new tail and try again
                         idx = new_idx;
-                        // we do not use hint::spin_loop here since we just
-                        // got fresh data which is likely to win the next CAS
-                        // unless we are under very heavy contention.
+                        backoff.spin();
                     }
                 }
             } else if diff < 0 {
-                // this slot contains data from the previous lap's write. has not been
-                // read yet
+                // this slot contains data from the previous lap's write. has
+                // not been read yet
                 return Err(val);
             } else if diff > 0 {
                 // another producer claimed the slot and updated tail and
                 // our copy is stale so we reload it.
 
-                // TODO: a more robust solution pending. would probably also include
-                // things like waiting strategies and park/yield and some state in
-                // the case of multiple threads
-                std::hint::spin_loop();
+                // No guarantees on when/if the CAS will succeed, so we may
+                // pause
+                backoff.pause();
                 idx = inner.tail.0.load(Ordering::Relaxed);
             }
         }
@@ -115,6 +113,7 @@ struct MpmcConsumer<T> {
 impl<T> MpmcConsumer<T> {
     fn try_pop(&self) -> Option<T> {
         let inner = &self.inner;
+        let mut backoff = Backoff::new();
 
         let mut idx = inner.head.0.load(Ordering::Relaxed);
 
@@ -145,6 +144,7 @@ impl<T> MpmcConsumer<T> {
                     Err(new_idx) => {
                         // another reader won the CAS
                         idx = new_idx;
+                        backoff.spin();
                     }
                 }
             } else if diff < 0 {
@@ -153,7 +153,10 @@ impl<T> MpmcConsumer<T> {
             } else {
                 // another consumer has read this position and advanced
                 // the sequence number but the head is stale
-                std::hint::spin_loop();
+
+                // No guarantees on when/if the CAS will succeed, so we may
+                // pause
+                backoff.pause();
                 idx = inner.head.0.load(Ordering::Relaxed);
             }
         }
