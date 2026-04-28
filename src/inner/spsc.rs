@@ -1,7 +1,10 @@
-use crate::inner::{CachePadded, LuxError, Slot, alloc_slots};
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use crate::inner::{CachePadded, Slot, alloc_slots};
+use std::{
+    mem,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 struct SpscInner<T> {
@@ -38,6 +41,10 @@ impl<T> SpscInner<T> {
 
 impl<T> Drop for SpscInner<T> {
     fn drop(&mut self) {
+        if !mem::needs_drop::<T>() {
+            return;
+        }
+
         // SAFETY: here we know that we are the only threads accessing this
         // since all references are dropped before this is called.
         // The standard library also uses Odrdering::Realease to decerement

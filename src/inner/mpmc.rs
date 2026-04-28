@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    mem,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use crate::inner::{CachePadded, SequencedSlot, alloc_sequenced_slots, backoff::Backoff};
@@ -38,6 +41,10 @@ impl<T> MpmcInner<T> {
 
 impl<T> Drop for MpmcInner<T> {
     fn drop(&mut self) {
+        if !mem::needs_drop::<T>() {
+            return;
+        }
+
         let h = self.head.0.load(Ordering::Relaxed);
         let t = self.tail.0.load(Ordering::Relaxed);
 
