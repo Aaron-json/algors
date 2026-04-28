@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "algors-queue"
 version = "0.1.0"
+dependencies = [
+ "algors-utils",
+]
+
+[[package]]
+name = "algors-utils"
+version = "0.1.0"

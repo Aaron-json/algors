@@ -6,19 +6,19 @@ use std::{
     },
 };
 
-use crate::inner::{CachePadded, SequencedSlot, alloc_sequenced_slots, backoff::Backoff};
+use algors_utils::{CachePadded, SequencedSlot, alloc_sequenced_slots, backoff::Backoff};
 
 // Used to implement a Multi-producer Multi-consumer queue. The design
 // implements Dmitry vyukov's MPMC Queue ideas.
-struct MpmcInner<T> {
-    buf: Box<[SequencedSlot<T>]>,
+pub struct MpmcInner<T> {
+    pub buf: Box<[SequencedSlot<T>]>,
 
-    head: CachePadded<AtomicUsize>,
-    tail: CachePadded<AtomicUsize>,
+    pub head: CachePadded<AtomicUsize>,
+    pub tail: CachePadded<AtomicUsize>,
 }
 
 impl<T> MpmcInner<T> {
-    fn new(cap_pow: u8) -> Self {
+    pub fn new(cap_pow: u8) -> Self {
         let size: usize = 1 << cap_pow;
 
         MpmcInner {
@@ -58,12 +58,12 @@ impl<T> Drop for MpmcInner<T> {
     }
 }
 
-struct MpmcProducer<T> {
-    inner: Arc<MpmcInner<T>>,
+pub struct MpmcProducer<T> {
+    pub inner: Arc<MpmcInner<T>>,
 }
 
 impl<T> MpmcProducer<T> {
-    fn try_push(&self, val: T) -> Result<(), T> {
+    pub fn try_push(&self, val: T) -> Result<(), T> {
         let inner = &self.inner;
         let mut backoff = Backoff::new();
 
@@ -113,12 +113,12 @@ impl<T> MpmcProducer<T> {
     }
 }
 
-struct MpmcConsumer<T> {
-    inner: Arc<MpmcInner<T>>,
+pub struct MpmcConsumer<T> {
+    pub inner: Arc<MpmcInner<T>>,
 }
 
 impl<T> MpmcConsumer<T> {
-    fn try_pop(&self) -> Option<T> {
+    pub fn try_pop(&self) -> Option<T> {
         let inner = &self.inner;
         let mut backoff = Backoff::new();
 

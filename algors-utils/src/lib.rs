@@ -1,22 +1,20 @@
 use std::{cell::UnsafeCell, mem::MaybeUninit, sync::atomic::AtomicUsize};
 
 pub mod backoff;
-pub mod mpmc;
-pub mod spsc;
 
 /// Cache padding that enforces 64 byte alignment.
 #[repr(align(64))]
-pub struct CachePadded<T>(T);
+pub struct CachePadded<T>(pub T);
 
-type Slot<T> = UnsafeCell<MaybeUninit<T>>;
+pub type Slot<T> = UnsafeCell<MaybeUninit<T>>;
 
-struct SequencedSlot<T> {
-    seq: AtomicUsize,
-    data: UnsafeCell<MaybeUninit<T>>,
+pub struct SequencedSlot<T> {
+    pub seq: AtomicUsize,
+    pub data: UnsafeCell<MaybeUninit<T>>,
 }
 
 /// Allocate `n` uninitialized slots.
-fn alloc_slots<T>(size: usize) -> Box<[Slot<T>]> {
+pub fn alloc_slots<T>(size: usize) -> Box<[Slot<T>]> {
     let mut data = Vec::with_capacity(size);
     unsafe {
         // We tell the Vec that it is full to avoid initializing the whole
@@ -29,7 +27,7 @@ fn alloc_slots<T>(size: usize) -> Box<[Slot<T>]> {
     data.into_boxed_slice()
 }
 
-fn alloc_sequenced_slots<T>(size: usize) -> Box<[SequencedSlot<T>]> {
+pub fn alloc_sequenced_slots<T>(size: usize) -> Box<[SequencedSlot<T>]> {
     let mut data = Vec::<SequencedSlot<T>>::with_capacity(size);
     unsafe {
         // It is fine if data contains garbage here, read alloc_slots for
@@ -39,7 +37,10 @@ fn alloc_sequenced_slots<T>(size: usize) -> Box<[SequencedSlot<T>]> {
 
     // Initially, a slot's sequence is its index.
     for i in 0..size {
-        data[i].seq = AtomicUsize::new(i);
+        data[i] = SequencedSlot {
+            seq: AtomicUsize::new(i),
+            data: UnsafeCell::new(MaybeUninit::uninit()),
+        };
     }
 
     data.into_boxed_slice()

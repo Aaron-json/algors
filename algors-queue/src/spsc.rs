@@ -1,4 +1,4 @@
-use crate::inner::{CachePadded, Slot, alloc_slots};
+use algors_utils::{CachePadded, Slot, alloc_slots};
 use std::{
     mem,
     sync::{
@@ -7,18 +7,18 @@ use std::{
     },
 };
 
-struct SpscInner<T> {
+pub struct SpscInner<T> {
     // padded to avoid false sharing.
-    head: CachePadded<AtomicUsize>,
-    tail: CachePadded<AtomicUsize>,
+    pub head: CachePadded<AtomicUsize>,
+    pub tail: CachePadded<AtomicUsize>,
 
     // this is not padded since the 'fat pointer' is never changed, only
     // the data behind it.
-    buf: Box<[Slot<T>]>,
+    pub buf: Box<[Slot<T>]>,
 }
 
 impl<T> SpscInner<T> {
-    fn new(cap_pow: u8) -> Self {
+    pub fn new(cap_pow: u8) -> Self {
         let size: usize = 1 << cap_pow;
 
         SpscInner {
@@ -63,18 +63,18 @@ impl<T> Drop for SpscInner<T> {
     }
 }
 
-struct SpscProducer<T> {
-    inner: Arc<SpscInner<T>>,
+pub struct SpscProducer<T> {
+    pub inner: Arc<SpscInner<T>>,
     // The consumer writes to the head. Doing an atomic load every time would
     // create cache coherence traffic and bouncing between the producer and
     // consumer threads. Since we know that the head only moves forward, we
     // can cache the last seen value and write up to it without loading the
     // actual head.
-    head_cache: usize,
+    pub head_cache: usize,
 }
 
 impl<T> SpscProducer<T> {
-    fn try_push(&mut self, val: T) -> Result<(), T> {
+    pub fn try_push(&mut self, val: T) -> Result<(), T> {
         let inner = &self.inner;
         let t = inner.tail.0.load(Ordering::Relaxed);
 
@@ -98,15 +98,15 @@ impl<T> SpscProducer<T> {
     }
 }
 
-struct SpscConsumer<T> {
-    inner: Arc<SpscInner<T>>,
+pub struct SpscConsumer<T> {
+    pub inner: Arc<SpscInner<T>>,
     // Cached tail to avoid cache coherence traffic and cache bouncing.
     // For more details, read the producer's type.
-    tail_cache: usize,
+    pub tail_cache: usize,
 }
 
 impl<T> SpscConsumer<T> {
-    fn try_pop(&mut self) -> Option<T> {
+    pub fn try_pop(&mut self) -> Option<T> {
         let inner = &self.inner;
         let h = inner.head.0.load(Ordering::Relaxed);
 
@@ -131,7 +131,7 @@ impl<T> SpscConsumer<T> {
 unsafe impl<T: Send> Send for SpscConsumer<T> {}
 unsafe impl<T: Send> Send for SpscProducer<T> {}
 
-fn new_spsc<T>(cap_pow: u8) -> (SpscConsumer<T>, SpscProducer<T>) {
+pub fn new_spsc<T>(cap_pow: u8) -> (SpscConsumer<T>, SpscProducer<T>) {
     let inner = Arc::new(SpscInner::<T>::new(cap_pow));
     let c = SpscConsumer {
         inner: inner.clone(),
