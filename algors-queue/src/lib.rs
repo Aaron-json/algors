@@ -1,5 +1,6 @@
 pub mod mpmc;
 pub mod spsc;
+pub mod wait;
 
-pub use mpmc::{MpmcProducer, MpmcConsumer, MpmcInner};
-pub use spsc::{SpscProducer, SpscConsumer, SpscInner, new_spsc};
+pub use mpmc::{MpmcConsumer, MpmcInner, MpmcProducer};
+pub use spsc::{SpscConsumer, SpscInner, SpscProducer, new_spsc};
