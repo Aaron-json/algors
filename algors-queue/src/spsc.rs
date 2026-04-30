@@ -7,7 +7,7 @@ use alloc::sync::Arc;
 
 use crate::slot::Slot;
 
-pub struct SpscInner<T> {
+struct Inner<T> {
     // padded to avoid false sharing.
     pub head: CachePadded<AtomicUsize>,
     pub tail: CachePadded<AtomicUsize>,
@@ -17,7 +17,7 @@ pub struct SpscInner<T> {
     pub buf: Box<[Slot<T>]>,
 }
 
-impl<T> SpscInner<T> {
+impl<T> Inner<T> {
     pub fn new(pow: u8) -> Self {
         assert!(u32::from(pow) < usize::BITS);
         let size: usize = 1 << pow;
@@ -31,7 +31,7 @@ impl<T> SpscInner<T> {
             buf = Box::from_raw(Box::into_raw(buf_raw) as *mut [Slot<T>]);
         }
 
-        SpscInner {
+        Inner {
             buf,
             head: CachePadded(AtomicUsize::new(0)),
             tail: CachePadded(AtomicUsize::new(0)),
@@ -49,7 +49,7 @@ impl<T> SpscInner<T> {
     }
 }
 
-impl<T> Drop for SpscInner<T> {
+impl<T> Drop for Inner<T> {
     fn drop(&mut self) {
         if !mem::needs_drop::<T>() {
             return;
@@ -73,17 +73,17 @@ impl<T> Drop for SpscInner<T> {
     }
 }
 
-pub struct SpscProducer<T> {
-    pub inner: Arc<SpscInner<T>>,
+pub struct Producer<T> {
+    inner: Arc<Inner<T>>,
     // The consumer writes to the head. Doing an atomic load every time would
     // create cache coherence traffic and bouncing between the producer and
     // consumer threads. Since we know that the head only moves forward, we
     // can cache the last seen value and write up to it without loading the
     // actual head.
-    pub head_cache: usize,
+    head_cache: usize,
 }
 
-impl<T> SpscProducer<T> {
+impl<T> Producer<T> {
     pub fn try_push(&mut self, val: T) -> Result<(), T> {
         let inner = &self.inner;
         let t = inner.tail.0.load(Ordering::Relaxed);
@@ -108,14 +108,14 @@ impl<T> SpscProducer<T> {
     }
 }
 
-pub struct SpscConsumer<T> {
-    pub inner: Arc<SpscInner<T>>,
+pub struct Consumer<T> {
+    inner: Arc<Inner<T>>,
     // Cached tail to avoid cache coherence traffic and cache bouncing.
     // For more details, read the producer's type.
-    pub tail_cache: usize,
+    tail_cache: usize,
 }
 
-impl<T> SpscConsumer<T> {
+impl<T> Consumer<T> {
     pub fn try_pop(&mut self) -> Option<T> {
         let inner = &self.inner;
         let h = inner.head.0.load(Ordering::Relaxed);
@@ -138,17 +138,17 @@ impl<T> SpscConsumer<T> {
 // Both the Consumer and Producer can be sent from one thread to another
 // but only one of each can exist. That is, you can not have shared references
 // to any one of them.
-unsafe impl<T: Send> Send for SpscConsumer<T> {}
-unsafe impl<T: Send> Send for SpscProducer<T> {}
+unsafe impl<T: Send> Send for Consumer<T> {}
+unsafe impl<T: Send> Send for Producer<T> {}
 
-pub fn new_spsc<T>(pow: u8) -> (SpscConsumer<T>, SpscProducer<T>) {
-    let inner = Arc::new(SpscInner::<T>::new(pow));
-    let c = SpscConsumer {
+pub fn new_spsc<T>(pow: u8) -> (Consumer<T>, Producer<T>) {
+    let inner = Arc::new(Inner::<T>::new(pow));
+    let c = Consumer {
         inner: inner.clone(),
         tail_cache: 0,
     };
 
-    let p = SpscProducer {
+    let p = Producer {
         inner: inner,
         head_cache: 0,
     };

@@ -14,14 +14,14 @@ use crate::slot::SequencedSlot;
 
 // Used to implement a Multi-producer Multi-consumer queue. The design
 // implements Dmitry vyukov's MPMC Queue ideas.
-pub struct MpmcInner<T> {
+struct Inner<T> {
     pub buf: Box<[SequencedSlot<T>]>,
 
     pub head: CachePadded<AtomicUsize>,
     pub tail: CachePadded<AtomicUsize>,
 }
 
-impl<T> MpmcInner<T> {
+impl<T> Inner<T> {
     /// Creates a new instance. Panics if pow is not less than
     /// usize::BITS
     pub fn new(pow: u8) -> Self {
@@ -47,7 +47,7 @@ impl<T> MpmcInner<T> {
             }
         }
 
-        MpmcInner {
+        Inner {
             buf,
             head: CachePadded(AtomicUsize::new(0)),
             tail: CachePadded(AtomicUsize::new(0)),
@@ -65,7 +65,7 @@ impl<T> MpmcInner<T> {
     }
 }
 
-impl<T> Drop for MpmcInner<T> {
+impl<T> Drop for Inner<T> {
     fn drop(&mut self) {
         if !mem::needs_drop::<T>() {
             return;
@@ -92,11 +92,11 @@ impl<T> Drop for MpmcInner<T> {
     }
 }
 
-pub struct MpmcProducer<T> {
-    pub inner: Arc<MpmcInner<T>>,
+pub struct Producer<T> {
+    inner: Arc<Inner<T>>,
 }
 
-impl<T> MpmcProducer<T> {
+impl<T> Producer<T> {
     pub fn try_push(&self, val: T) -> Result<(), T> {
         let inner = &self.inner;
         let mut backoff = Backoff::new();
@@ -147,11 +147,11 @@ impl<T> MpmcProducer<T> {
     }
 }
 
-pub struct MpmcConsumer<T> {
-    pub inner: Arc<MpmcInner<T>>,
+pub struct Consumer<T> {
+    inner: Arc<Inner<T>>,
 }
 
-impl<T> MpmcConsumer<T> {
+impl<T> Consumer<T> {
     pub fn try_pop(&self) -> Option<T> {
         let inner = &self.inner;
         let mut backoff = Backoff::new();
@@ -206,14 +206,14 @@ impl<T> MpmcConsumer<T> {
 
 // Implement clone so users do not have to wrap in another Arc, increasing
 // indirections.
-impl<T> Clone for MpmcProducer<T> {
+impl<T> Clone for Producer<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
         }
     }
 }
-impl<T> Clone for MpmcConsumer<T> {
+impl<T> Clone for Consumer<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -223,19 +223,19 @@ impl<T> Clone for MpmcConsumer<T> {
 
 // Both the Consumer and Producer can be sent and shared from one thread to
 // another
-unsafe impl<T: Send> Send for MpmcProducer<T> {}
-unsafe impl<T: Send> Send for MpmcConsumer<T> {}
-unsafe impl<T: Send> Sync for MpmcProducer<T> {}
-unsafe impl<T: Send> Sync for MpmcConsumer<T> {}
+unsafe impl<T: Send> Send for Producer<T> {}
+unsafe impl<T: Send> Send for Consumer<T> {}
+unsafe impl<T: Send> Sync for Producer<T> {}
+unsafe impl<T: Send> Sync for Consumer<T> {}
 
-pub fn new_mpmc<T>(pow: u8) -> (MpmcConsumer<T>, MpmcProducer<T>) {
-    let inner = Arc::new(MpmcInner::new(pow));
+pub fn new_mpmc<T>(pow: u8) -> (Consumer<T>, Producer<T>) {
+    let inner = Arc::new(Inner::new(pow));
 
-    let c = MpmcConsumer {
+    let c = Consumer {
         inner: inner.clone(),
     };
 
-    let p = MpmcProducer {
+    let p = Producer {
         inner: inner,
     };
 
