@@ -77,8 +77,8 @@ impl<T> Drop for MpmcInner<T> {
             // SAFETY: We drop an element when its sequence number indicates
             // it was fully written (ready for reading). This risks
             // a memory leak if the slot was written to but the sequence
-            // never updated. The alternative is dropping anyways which
-            // might drop an initialized/dropped value leading to UB.
+            // never updated. The alternative is dropping anyways which might
+            // drop an uninitialized/no longer owned value leading to UB.
             if slot.seq.load(Ordering::Relaxed) == idx + 1 {
                 unsafe {
                     (*self.buf[self.mask(idx)].data.get()).assume_init_drop();
