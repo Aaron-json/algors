@@ -22,8 +22,12 @@ pub struct MpmcInner<T> {
 }
 
 impl<T> MpmcInner<T> {
-    pub fn new(cap_pow: u8) -> Self {
-        let size: usize = 1 << cap_pow;
+    /// Creates a new instance. Panics if pow is not less than
+    /// usize::BITS
+    pub fn new(pow: u8) -> Self {
+        assert!(u32::from(pow) < usize::BITS);
+
+        let size: usize = 1 << pow;
         let buf_raw = alloc_uninit_slice::<SequencedSlot<T>>(size);
 
         let mut buf: Box<[SequencedSlot<T>]>;

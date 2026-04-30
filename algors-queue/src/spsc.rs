@@ -18,8 +18,9 @@ pub struct SpscInner<T> {
 }
 
 impl<T> SpscInner<T> {
-    pub fn new(cap_pow: u8) -> Self {
-        let size: usize = 1 << cap_pow;
+    pub fn new(pow: u8) -> Self {
+        assert!(u32::from(pow) < usize::BITS);
+        let size: usize = 1 << pow;
         let buf_raw = alloc_uninit_slice::<Slot<T>>(size);
 
         let buf: Box<[Slot<T>]>;
@@ -140,8 +141,8 @@ impl<T> SpscConsumer<T> {
 unsafe impl<T: Send> Send for SpscConsumer<T> {}
 unsafe impl<T: Send> Send for SpscProducer<T> {}
 
-pub fn new_spsc<T>(cap_pow: u8) -> (SpscConsumer<T>, SpscProducer<T>) {
-    let inner = Arc::new(SpscInner::<T>::new(cap_pow));
+pub fn new_spsc<T>(pow: u8) -> (SpscConsumer<T>, SpscProducer<T>) {
+    let inner = Arc::new(SpscInner::<T>::new(pow));
     let c = SpscConsumer {
         inner: inner.clone(),
         tail_cache: 0,
