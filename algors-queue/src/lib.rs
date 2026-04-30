@@ -1,4 +1,5 @@
 pub mod mpmc;
+pub mod slot;
 pub mod spsc;
 pub mod wait;
 

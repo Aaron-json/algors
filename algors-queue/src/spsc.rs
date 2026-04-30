@@ -1,11 +1,10 @@
-use algors_utils::{CachePadded, Slot, alloc_slots};
-use std::{
-    mem,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
+use algors_utils::{CachePadded, alloc::alloc_uninit_slice};
+use core::mem;
+use core::sync::atomic::{AtomicUsize, Ordering};
+extern crate alloc;
+use alloc::sync::Arc;
+
+use crate::slot::Slot;
 
 pub struct SpscInner<T> {
     // padded to avoid false sharing.
@@ -20,9 +19,18 @@ pub struct SpscInner<T> {
 impl<T> SpscInner<T> {
     pub fn new(cap_pow: u8) -> Self {
         let size: usize = 1 << cap_pow;
+        let buf_raw = alloc_uninit_slice::<Slot<T>>(size);
+
+        let buf: Box<[Slot<T>]>;
+        unsafe {
+            // SAFETY: We can cast Box<[MaybeUninit<Slot<T>>]> to
+            // Box<[Slot<T>]> since Slot<T> contains MaybeUninit<T> internally
+            // so we will not drop uninitialized memory..
+            buf = Box::from_raw(Box::into_raw(buf_raw) as *mut [Slot<T>]);
+        }
 
         SpscInner {
-            buf: alloc_slots(size),
+            buf,
             head: CachePadded(AtomicUsize::new(0)),
             tail: CachePadded(AtomicUsize::new(0)),
         }

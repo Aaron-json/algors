@@ -1,12 +1,17 @@
-use std::{
-    mem,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+use core::mem;
+use core::{
+    cell::UnsafeCell,
+    mem::MaybeUninit,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
-use algors_utils::{CachePadded, SequencedSlot, alloc_sequenced_slots, backoff::Backoff};
+extern crate alloc;
+
+use alloc::sync::Arc;
+
+use algors_utils::{CachePadded, alloc::alloc_uninit_slice, backoff::Backoff};
+
+use crate::slot::SequencedSlot;
 
 // Used to implement a Multi-producer Multi-consumer queue. The design
 // implements Dmitry vyukov's MPMC Queue ideas.
@@ -20,9 +25,27 @@ pub struct MpmcInner<T> {
 impl<T> MpmcInner<T> {
     pub fn new(cap_pow: u8) -> Self {
         let size: usize = 1 << cap_pow;
+        let buf_raw = alloc_uninit_slice::<SequencedSlot<T>>(size);
+
+        let mut buf: Box<[SequencedSlot<T>]>;
+        unsafe {
+            // SAFETY: We can cast Box<[MaybeUninit<SequencedSlot<T>>]> to
+            // Box<[SequencedSlot<T>]> since SequencedSlot<T> contains
+            // MaybeUninit<T> internally for the data and the sequence
+            // is initialized manually.
+            buf = Box::from_raw(Box::into_raw(buf_raw) as *mut [SequencedSlot<T>]);
+        }
+
+        // initialize the sequence numbers
+        for i in 0..size {
+            buf[i] = SequencedSlot {
+                seq: AtomicUsize::new(i),
+                data: UnsafeCell::new(MaybeUninit::uninit()),
+            }
+        }
 
         MpmcInner {
-            buf: alloc_sequenced_slots(size),
+            buf,
             head: CachePadded(AtomicUsize::new(0)),
             tail: CachePadded(AtomicUsize::new(0)),
         }

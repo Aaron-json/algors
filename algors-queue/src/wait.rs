@@ -1,4 +1,5 @@
 use algors_utils::backoff::Backoff;
+extern crate alloc;
 use std::sync::{Condvar, Mutex};
 
 pub trait WaitStrategy {
@@ -53,7 +54,7 @@ pub struct BlockingWait {
 }
 
 impl BlockingWait {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             state: Mutex::new(0),
             cvar: Condvar::new(),
