@@ -2,6 +2,7 @@ use algors_utils::{CachePadded, alloc::alloc_uninit_slice};
 use core::mem;
 use core::sync::atomic::{AtomicUsize, Ordering};
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use crate::slot::Slot;

@@ -2,10 +2,10 @@ extern crate alloc;
 
 use core::mem::MaybeUninit;
 
-use alloc::boxed;
+use alloc::{boxed::Box, vec::Vec};
 
 // Allocates memory for `size` uninitialized elements of type `T`.
-pub fn alloc_uninit_slice<T>(size: usize) -> boxed::Box<[MaybeUninit<T>]> {
+pub fn alloc_uninit_slice<T>(size: usize) -> Box<[MaybeUninit<T>]> {
     let mut data = Vec::with_capacity(size);
     unsafe {
         data.set_len(size);

@@ -1,5 +1,7 @@
 use algors_utils::backoff::Backoff;
 extern crate alloc;
+
+#[cfg(feature = "std")]
 use std::sync::{Condvar, Mutex};
 
 pub trait WaitStrategy {
@@ -48,11 +50,13 @@ impl WaitStrategy for YieldWait {
     fn notify(&self) {}
 }
 
+#[cfg(feature = "std")]
 pub struct BlockingWait {
     state: Mutex<u64>,
     cvar: Condvar,
 }
 
+#[cfg(feature = "std")]
 impl BlockingWait {
     pub fn new() -> Self {
         Self {
@@ -62,6 +66,7 @@ impl BlockingWait {
     }
 }
 
+#[cfg(feature = "std")]
 impl WaitStrategy for BlockingWait {
     fn wait_for<F, T>(&self, mut op: F) -> T
     where
