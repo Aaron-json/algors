@@ -227,3 +227,17 @@ unsafe impl<T: Send> Send for MpmcProducer<T> {}
 unsafe impl<T: Send> Send for MpmcConsumer<T> {}
 unsafe impl<T: Send> Sync for MpmcProducer<T> {}
 unsafe impl<T: Send> Sync for MpmcConsumer<T> {}
+
+pub fn new_mpmc<T>(pow: u8) -> (MpmcConsumer<T>, MpmcProducer<T>) {
+    let inner = Arc::new(MpmcInner::new(pow));
+
+    let c = MpmcConsumer {
+        inner: inner.clone(),
+    };
+
+    let p = MpmcProducer {
+        inner: inner,
+    };
+
+    (c, p)
+}
