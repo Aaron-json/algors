@@ -3,6 +3,13 @@ const SPIN_MAX: u32 = 6;
 // Maximum stems
 const YIELD_MAX: u32 = 8;
 
+// Utilitiy function that spins 2^(pow) times.
+fn spin_for(pow: u32) {
+    for _ in 0..(1 << pow) {
+        core::hint::spin_loop();
+    }
+}
+
 pub struct Backoff {
     count: u32,
 }
@@ -16,22 +23,26 @@ impl Backoff {
     // Implements backoff with pure spinning.
     #[inline]
     pub fn spin(&mut self) {
-        for _ in 0..(1 << self.count.min(SPIN_MAX)) {
-            std::hint::spin_loop();
-        }
-
+        spin_for(self.count.min(SPIN_MAX));
         self.count = self.count.saturating_add(1);
     }
 
-    // Implements backoff by spinning first, then yielding.
+    // Implements backoff by spinning first, then attempts
+    // to yield execution if the `std` feature is enabled.
+    // If the feature is not enabled, it continues to spin
+    // at the bounded number of times.
     #[inline]
     pub fn pause(&mut self) {
         if self.count <= SPIN_MAX {
-            for _ in 0..(1 << self.count) {
-                std::hint::spin_loop();
-            }
+            spin_for(self.count);
         } else {
+            #[cfg(feature = "std")]
             std::thread::yield_now();
+
+            // If running without a stdlib, keep spinning
+            // at the limit.
+            #[cfg(not(feature = "std"))]
+            spin_for(self.count.min(SPIN_MAX));
         }
 
         self.count = self.count.saturating_add(1);
