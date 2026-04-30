@@ -31,7 +31,10 @@ impl WaitStrategy for SpinWait {
 }
 
 // Implements a wait strategy that starts with a spin wait and then
-// yields to the OS when the spin limit is reached.
+// attempts to yield to the OS when the spin limit is reached.
+//
+// This strategy holds shared memory and thus users must share the
+// same object.
 pub struct YieldWait;
 
 impl WaitStrategy for YieldWait {
