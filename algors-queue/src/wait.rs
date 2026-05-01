@@ -5,18 +5,18 @@ extern crate alloc;
 use std::sync::{Condvar, Mutex};
 
 pub trait WaitStrategy {
-    // Error type is left up to implementation.
-    //
-    // We avoid a generic error since one strategy could have multiple
-    // implementations with different error types, which adds complexity.
-    //
-    // If a single implementation could have different approaches, then they
-    // should be split into different implementations.
+    /// Error type is left up to implementation.
+    ///
+    /// We avoid a generic error since one strategy could have multiple
+    /// implementations with different error types, which adds complexity.
+    ///
+    /// If a single implementation could have different approaches, then they
+    /// should be split into different implementations.
     type Error;
 
-    // Wait for accepts an op function that is waited for, for successful
-    // completion. Some strategies may support aborting/giving up
-    // (e.x timeout).
+    /// Wait for accepts an op function that is waited for, for successful
+    /// completion. Some strategies may support aborting/giving up
+    /// (e.x timeout).
     fn wait_for<F, T>(&self, op: F) -> Result<T, Self::Error>
     where
         F: FnMut() -> Option<T>;
