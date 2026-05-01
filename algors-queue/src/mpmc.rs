@@ -10,15 +10,15 @@ use alloc::sync::Arc;
 
 use algors_utils::{CachePadded, alloc::alloc_uninit_slice, backoff::Backoff};
 
-use crate::slot::SequencedSlot;
+use crate::{slot::SequencedSlot, wait::WaitStrategy};
 
 // Used to implement a Multi-producer Multi-consumer queue. The design
 // implements Dmitry vyukov's MPMC Queue ideas.
 struct Inner<T> {
-    pub buf: Box<[SequencedSlot<T>]>,
+    buf: Box<[SequencedSlot<T>]>,
 
-    pub head: CachePadded<AtomicUsize>,
-    pub tail: CachePadded<AtomicUsize>,
+    head: CachePadded<AtomicUsize>,
+    tail: CachePadded<AtomicUsize>,
 }
 
 impl<T> Inner<T> {
@@ -145,6 +145,44 @@ impl<T> Producer<T> {
             }
         }
     }
+
+    /// Attempts to push the object using the given waiter.
+    /// Returns a result since some waiters could allow giving up and
+    /// aborting even when not successful.
+    ///
+    /// If not successful, the waiter's error is returned together with
+    /// the value.
+    ///
+    /// The waiter is used to retry until successful completion or abortion.
+    /// The notifier is used to broadcast the change. The waiter and notifier
+    /// may or may not be the same object.
+    ///
+    /// The separation allows for precise notifications to consumers without
+    /// waking up other producers.
+    pub fn push<W: WaitStrategy, N: WaitStrategy>(
+        &self,
+        val: T,
+        waiter: &W,
+        notifier: &N,
+    ) -> Result<(), (T, W::Error)> {
+        // Offloads correctness to runtime but the penalty is manageable.
+        let mut store = Some(val);
+        let res = waiter.wait_for(|| match self.try_push(store.take()?) {
+            Ok(()) => Some(()),
+            Err(v) => {
+                store = Some(v);
+                None
+            }
+        });
+
+        match res {
+            Ok(()) => {
+                notifier.notify();
+                Ok(())
+            }
+            Err(e) => Err((store.take().unwrap(), e)),
+        }
+    }
 }
 
 pub struct Consumer<T> {
@@ -202,6 +240,30 @@ impl<T> Consumer<T> {
             }
         }
     }
+
+    /// Attempts to pop a value.
+    ///
+    /// The waiter is used to retry until successful completion or abortion.
+    /// The notifier is used to broadcast the change. The waiter and notifier
+    /// may or may not be the same object.
+    ///
+    /// The separation allows for precise notifications to producers without
+    /// waking up other consumers.
+    pub fn pop<W: WaitStrategy, N: WaitStrategy>(
+        &self,
+        waiter: &W,
+        notifier: &N,
+    ) -> Result<T, W::Error> {
+        let res = waiter.wait_for(|| self.try_pop());
+
+        match res {
+            Ok(val) => {
+                notifier.notify();
+                Ok(val)
+            }
+            _ => res,
+        }
+    }
 }
 
 // Implement clone so users do not have to wrap in another Arc, increasing
@@ -235,9 +297,7 @@ pub fn new_mpmc<T>(pow: u8) -> (Consumer<T>, Producer<T>) {
         inner: inner.clone(),
     };
 
-    let p = Producer {
-        inner: inner,
-    };
+    let p = Producer { inner: inner };
 
     (c, p)
 }

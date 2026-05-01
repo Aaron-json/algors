@@ -6,15 +6,16 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use crate::slot::Slot;
+use crate::wait::WaitStrategy;
 
 struct Inner<T> {
     // padded to avoid false sharing.
-    pub head: CachePadded<AtomicUsize>,
-    pub tail: CachePadded<AtomicUsize>,
+    head: CachePadded<AtomicUsize>,
+    tail: CachePadded<AtomicUsize>,
 
     // this is not padded since the 'fat pointer' is never changed, only
     // the data behind it.
-    pub buf: Box<[Slot<T>]>,
+    buf: Box<[Slot<T>]>,
 }
 
 impl<T> Inner<T> {
@@ -106,6 +107,45 @@ impl<T> Producer<T> {
 
         Ok(())
     }
+
+    /// Attempts to push the object using the given waiter.
+    /// Returns a result since some waiters could allow giving up and
+    /// aborting even when not successful.
+    ///
+    /// If not successful, the waiter's error is returned together with
+    /// the value.
+    ///
+    /// The waiter is used to retry until successful completion or abortion.
+    /// The notifier is used to broadcast the change. The waiter and notifier
+    /// may or may not be the same object.
+    ///
+    /// The separation allows for precise notifications to consumers without
+    /// waking up other producers.
+    pub fn push<W: WaitStrategy, N: WaitStrategy>(
+        &mut self,
+        val: T,
+        waiter: &W,
+        notifier: &N,
+    ) -> Result<(), (T, W::Error)> {
+        // We need the value after waiting, so we cannot directly
+        // move into the closure since it is an FnMut.
+        let mut store = Some(val);
+        let res = waiter.wait_for(|| match self.try_push(store.take()?) {
+            Ok(()) => Some(()),
+            Err(v) => {
+                store = Some(v);
+                None
+            }
+        });
+
+        match res {
+            Ok(()) => {
+                notifier.notify();
+                Ok(())
+            }
+            Err(e) => Err((store.take().unwrap(), e)),
+        }
+    }
 }
 
 pub struct Consumer<T> {
@@ -132,6 +172,30 @@ impl<T> Consumer<T> {
         inner.head.0.store(h + 1, Ordering::Release);
 
         Some(val)
+    }
+
+    /// Attempts to pop a value.
+    ///
+    /// The waiter is used to retry until successful completion or abortion.
+    /// The notifier is used to broadcast the change. The waiter and notifier
+    /// may or may not be the same object.
+    ///
+    /// The separation allows for precise notifications to producers without
+    /// waking up other consumers.
+    pub fn pop<W: WaitStrategy, N: WaitStrategy>(
+        &mut self,
+        waiter: &W,
+        notifier: &N,
+    ) -> Result<T, W::Error> {
+        let res = waiter.wait_for(|| self.try_pop());
+
+        match res {
+            Ok(val) => {
+                notifier.notify();
+                Ok(val)
+            }
+            _ => res,
+        }
     }
 }
 
