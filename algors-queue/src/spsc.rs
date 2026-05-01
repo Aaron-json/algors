@@ -1,4 +1,4 @@
-use algors_utils::{CachePadded, alloc::alloc_uninit_slice};
+use algors_utils::{CachePadded, alloc::alloc_uninit_slice, waiter::Waiter};
 use core::mem;
 use core::sync::atomic::{AtomicUsize, Ordering};
 extern crate alloc;
@@ -6,7 +6,6 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use crate::slot::Slot;
-use crate::wait::WaitStrategy;
 
 struct Inner<T> {
     // padded to avoid false sharing.
@@ -121,7 +120,7 @@ impl<T> Producer<T> {
     ///
     /// The separation allows for precise notifications to consumers without
     /// waking up other producers.
-    pub fn push<W: WaitStrategy, N: WaitStrategy>(
+    pub fn push<W: Waiter, N: Waiter>(
         &mut self,
         val: T,
         waiter: &W,
@@ -182,11 +181,7 @@ impl<T> Consumer<T> {
     ///
     /// The separation allows for precise notifications to producers without
     /// waking up other consumers.
-    pub fn pop<W: WaitStrategy, N: WaitStrategy>(
-        &mut self,
-        waiter: &W,
-        notifier: &N,
-    ) -> Result<T, W::Error> {
+    pub fn pop<W: Waiter, N: Waiter>(&mut self, waiter: &W, notifier: &N) -> Result<T, W::Error> {
         let res = waiter.wait_for(|| self.try_pop());
 
         match res {

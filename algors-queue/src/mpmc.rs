@@ -8,9 +8,9 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
-use algors_utils::{CachePadded, alloc::alloc_uninit_slice, backoff::Backoff};
+use algors_utils::{CachePadded, alloc::alloc_uninit_slice, backoff::Backoff, waiter::Waiter};
 
-use crate::{slot::SequencedSlot, wait::WaitStrategy};
+use crate::slot::SequencedSlot;
 
 // Used to implement a Multi-producer Multi-consumer queue. The design
 // implements Dmitry vyukov's MPMC Queue ideas.
@@ -159,7 +159,7 @@ impl<T> Producer<T> {
     ///
     /// The separation allows for precise notifications to consumers without
     /// waking up other producers.
-    pub fn push<W: WaitStrategy, N: WaitStrategy>(
+    pub fn push<W: Waiter, N: Waiter>(
         &self,
         val: T,
         waiter: &W,
@@ -249,11 +249,7 @@ impl<T> Consumer<T> {
     ///
     /// The separation allows for precise notifications to producers without
     /// waking up other consumers.
-    pub fn pop<W: WaitStrategy, N: WaitStrategy>(
-        &self,
-        waiter: &W,
-        notifier: &N,
-    ) -> Result<T, W::Error> {
+    pub fn pop<W: Waiter, N: Waiter>(&self, waiter: &W, notifier: &N) -> Result<T, W::Error> {
         let res = waiter.wait_for(|| self.try_pop());
 
         match res {
