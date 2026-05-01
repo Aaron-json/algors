@@ -40,10 +40,15 @@ impl<T> Inner<T> {
         }
 
         // initialize the sequence numbers
-        for i in 0..size {
-            buf[i] = SequencedSlot {
-                seq: AtomicUsize::new(i),
-                data: UnsafeCell::new(MaybeUninit::uninit()),
+        unsafe {
+            for i in 0..size {
+                core::ptr::write(
+                    &mut buf[i],
+                    SequencedSlot {
+                        seq: AtomicUsize::new(i),
+                        data: UnsafeCell::new(MaybeUninit::uninit()),
+                    },
+                );
             }
         }
 
