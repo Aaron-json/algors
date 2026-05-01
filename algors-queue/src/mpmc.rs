@@ -115,7 +115,7 @@ impl<T> Producer<T> {
                     Ordering::Relaxed,
                     Ordering::Relaxed,
                 ) {
-                    // we sucessfully claimed the slot
+                    // we successfully claimed the slot
                     Ok(_) => unsafe {
                         (*slot.data.get()).write(val);
                         // update to t + 1 to signal consumers this slot is

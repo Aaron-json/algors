@@ -57,7 +57,7 @@ impl<T> Drop for Inner<T> {
 
         // SAFETY: here we know that we are the only threads accessing this
         // since all references are dropped before this is called.
-        // The standard library also uses Odrdering::Realease to decerement
+        // The standard library also uses Odrdering::Release to decerement
         // the Arc counter, then an Ordering::Acquire fence after the last
         // decrement so we can safely load here with Ordering::Relaxed.
         let h = self.head.0.load(Ordering::Relaxed);
