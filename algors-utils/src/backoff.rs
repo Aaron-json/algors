@@ -1,6 +1,4 @@
-// Maximum spin value
 const SPIN_MAX: u32 = 6;
-// Maximum stems
 const YIELD_MAX: u32 = 8;
 
 // Utilitiy function that spins 2^(pow) times.
@@ -27,10 +25,10 @@ impl Backoff {
         self.count = self.count.saturating_add(1);
     }
 
-    // Implements backoff by spinning first, then attempts
-    // to yield execution if the `std` feature is enabled.
-    // If the feature is not enabled, it continues to spin
-    // at the bounded number of times.
+    /// Implements backoff by spinning first, then attempts
+    /// to yield execution if the `std` feature is enabled.
+    /// If the feature is not enabled, it continues to spin
+    /// at the bounded number of times.
     #[inline]
     pub fn pause(&mut self) {
         if self.count <= SPIN_MAX {
@@ -48,14 +46,14 @@ impl Backoff {
         self.count = self.count.saturating_add(1);
     }
 
-    // Returns whether we should give up backoff attempts and resort to
-    // another strategy.
+    /// Returns whether we should give up backoff attempts and resort to
+    /// another strategy.
     #[inline(always)]
     pub fn done(&mut self) -> bool {
         return self.count >= YIELD_MAX;
     }
 
-    // Resets the backoff for reuse.
+    /// Resets the backoff for reuse.
     #[inline(always)]
     pub fn reset(&mut self) {
         self.count = 0;
