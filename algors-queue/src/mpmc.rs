@@ -1,12 +1,7 @@
-use core::{
-    cell::UnsafeCell,
-    mem,
-    mem::MaybeUninit,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-extern crate alloc;
+use crate::sync::Arc;
+use crate::sync::atomic::{AtomicUsize, Ordering};
 use alloc::boxed::Box;
-use alloc::sync::Arc;
+use core::{cell::UnsafeCell, mem, mem::MaybeUninit};
 
 use algors_utils::{CachePadded, alloc::alloc_uninit_slice, backoff::Backoff, waiter::Waiter};
 

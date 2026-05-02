@@ -1,9 +1,8 @@
 use algors_utils::{CachePadded, alloc::alloc_uninit_slice, waiter::Waiter};
 use core::mem;
-use core::sync::atomic::{AtomicUsize, Ordering};
-extern crate alloc;
+use crate::sync::atomic::{AtomicUsize, Ordering};
 use alloc::boxed::Box;
-use alloc::sync::Arc;
+use crate::sync::Arc;
 
 use crate::slot::Slot;
 
