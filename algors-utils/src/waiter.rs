@@ -1,5 +1,4 @@
 use crate::backoff::Backoff;
-extern crate alloc;
 
 #[cfg(feature = "std")]
 use std::sync::{Condvar, Mutex};
