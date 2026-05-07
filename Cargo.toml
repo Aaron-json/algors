@@ -1,6 +1,6 @@
 [workspace]
 members = [
     "algors-utils",
-    "algors-queue",
+    "algors-queue", "algors-bloom",
 ]
 resolver = "2"
