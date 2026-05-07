@@ -14,7 +14,7 @@ struct Bloom {
 
 impl Bloom {
     /// Rounds float to the next multiple of the `BitsType` bit width.
-    #[inline]
+    #[inline(always)]
     fn roundf_to_bits_type_size(num: f64) -> f64 {
         (num / BitsType::BITS as f64).ceil() * BitsType::BITS as f64
     }
@@ -99,7 +99,7 @@ impl Bloom {
 
     /// Helper function to calculate the bit index given the hash and the
     /// index of the hash function.
-    #[inline]
+    #[inline(always)]
     fn bit_index(&self, h1: u64, h2: u64, i: u32) -> u64 {
         let h_combined = h1.wrapping_add((i as u64).wrapping_mul(h2));
 
