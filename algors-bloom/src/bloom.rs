@@ -5,7 +5,7 @@ type BitsType = u64;
 /// This implementation of the bloom filter uses ideas from the paper at
 /// `https://doi.org/10.1002/rsa.20208 Digital Object Identifier (DOI)``
 /// by Adam Kirsch and Michael Mitzenmacher.
-struct Bloom {
+pub struct Bloom {
     bits: Box<[BitsType]>,
     // cached to avoid recomputation
     bits_size: u64,
@@ -117,8 +117,8 @@ impl Bloom {
         for i in 0..self.hash_count {
             let bit_idx = self.bit_index(h1, h2, i);
 
-            let elem_idx = (bit_idx >> BitsType::BITS.trailing_zeros());
-            let mask = 1u64 << (bit_idx & (BitsType::BITS as u64 - 1));
+            let elem_idx = bit_idx >> BitsType::BITS.trailing_zeros();
+            let mask = 1 << (bit_idx & (BitsType::BITS as u64 - 1));
 
             if self.bits[elem_idx as usize] & mask == 0 {
                 return false;
@@ -137,8 +137,8 @@ impl Bloom {
         for i in 0..self.hash_count {
             let bit_idx = self.bit_index(h1, h2, i);
 
-            let elem_idx = (bit_idx >> BitsType::BITS.trailing_zeros());
-            let mask = 1u64 << (bit_idx & (BitsType::BITS as u64 - 1));
+            let elem_idx = bit_idx >> BitsType::BITS.trailing_zeros();
+            let mask = 1 << (bit_idx & (BitsType::BITS as u64 - 1));
 
             self.bits[elem_idx as usize] |= mask;
         }
