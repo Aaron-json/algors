@@ -17,8 +17,9 @@ struct Inner<T> {
 }
 
 impl<T> Inner<T> {
-    /// Creates a new instance. Panics if pow is not less than
-    /// usize::BITS
+    /// Creates a new instance.
+    /// # Panics
+    /// Panics if pow >= usize::BITS
     pub fn new(pow: u8) -> Self {
         assert!(u32::from(pow) < usize::BITS);
 
