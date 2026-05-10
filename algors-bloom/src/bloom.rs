@@ -159,4 +159,14 @@ impl<T: BloomHasher> Bloom<T> {
             self.bits[elem_idx as usize] |= mask;
         }
     }
+
+    /// Returns the number of hash functions being used.
+    pub fn hash_count(&self) -> u32 {
+        self.hash_count
+    }
+
+    /// Returns the total number of bits in the filter.
+    pub fn bits_size(&self) -> u64 {
+        self.bits_size
+    }
 }

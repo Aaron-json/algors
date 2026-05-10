@@ -5,3 +5,7 @@ edition = "2024"
 
 [dependencies]
 xxhash-rust = {version = "0.8", features = ["xxh3"]}
+
+[dev-dependencies]
+proptest = "1.6"
+rand = "0.8"
