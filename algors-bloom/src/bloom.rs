@@ -30,8 +30,13 @@ impl Bloom {
 
     /// Calculates the optimal size of the bit field given the size hint and
     /// the target false positive probability.
+    ///
+    /// # Panic
+    /// Panics if `p_false` is not in the range `(0.0, 1.0)`.
+    /// Panics if `size_hint` <= 0.
     fn calc_size(size_hint: usize, p_false: f64) -> u64 {
         assert!(p_false > 0.0 && p_false < 1.0);
+        assert!(size_hint > 0);
 
         // m = - (n ln (p)) / (ln(2))^2
         const LN2_SQUARED: f64 = core::f64::consts::LN_2 * core::f64::consts::LN_2;
@@ -46,24 +51,26 @@ impl Bloom {
 
     /// Helper to calculate the number of hash "functions" needed given
     /// the number of bits and a size hint.
+    /// # Panic
+    /// Panics if the resulting number of hashes cannot fit in a `u32`.
     fn calc_n_hashes(bits: u64, size_hint: usize) -> u32 {
         // k = (m/n) * (ln(2))
 
         // We round since the paper recommends using a slightly lower than
-        // optimal k value. This is preferred over the floor since it is
-        // more balanced.
+        // optimal k value to reduce hashing compute.
         let k = ((bits as f64 / size_hint as f64) * core::f64::consts::LN_2)
             .floor()
             .max(1.0);
 
         assert!(k.is_finite());
-        assert!(k >= 0.0);
         assert!(k <= u32::MAX as f64);
 
         k as u32
     }
 
     /// Create a new `Bloom` object with the target parameters.
+    /// # Panic
+    /// Panics if the allocation length cannot fit in a `usize`.
     pub fn with_hints(size_hint: usize, p_false: f64) -> Self {
         let bit_size = Self::calc_size(size_hint, p_false);
         let bits_rounded = Self::roundi_to_bits_type_size(bit_size);
