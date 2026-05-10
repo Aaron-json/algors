@@ -30,6 +30,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "algors-union-find"
+version = "0.1.0"
+
+[[package]]
 name = "algors-utils"
 version = "0.1.0"
 
