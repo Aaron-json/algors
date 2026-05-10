@@ -3,7 +3,7 @@ use core::fmt;
 use xxhash_rust::xxh3::xxh3_128_with_secret;
 
 /// Trait for the bloom filter's hashing implementations.
-pub trait BloomHasher {
+pub trait Hasher {
     type DeserializeError;
     type SerializeError;
 
@@ -64,7 +64,7 @@ impl XxHasher {
     }
 }
 
-impl BloomHasher for XxHasher {
+impl Hasher for XxHasher {
     type SerializeError = Infallible;
     type DeserializeError = XxHasherError;
 

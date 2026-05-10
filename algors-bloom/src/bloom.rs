@@ -1,11 +1,11 @@
-use crate::hash::BloomHasher;
+use crate::hash::Hasher;
 
 type BitsType = u64;
 
 /// This implementation of the bloom filter uses ideas from the paper at
 /// `https://doi.org/10.1002/rsa.20208 Digital Object Identifier (DOI)``
 /// by Adam Kirsch and Michael Mitzenmacher.
-pub struct Bloom<T: BloomHasher> {
+pub struct Bloom<T: Hasher> {
     bits: Box<[BitsType]>,
     // cached to avoid recomputation
     bits_size: u64,
@@ -13,7 +13,7 @@ pub struct Bloom<T: BloomHasher> {
     hasher: T,
 }
 
-impl<T: BloomHasher> Bloom<T> {
+impl<T: Hasher> Bloom<T> {
     /// Rounds float to the next multiple of the `BitsType` bit width.
     #[inline(always)]
     fn roundf_to_bits_type_size(num: f64) -> f64 {
