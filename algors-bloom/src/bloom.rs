@@ -1,18 +1,19 @@
-use xxhash_rust::xxh3::xxh3_128;
+use crate::hash::BloomHasher;
 
 type BitsType = u64;
 
 /// This implementation of the bloom filter uses ideas from the paper at
 /// `https://doi.org/10.1002/rsa.20208 Digital Object Identifier (DOI)``
 /// by Adam Kirsch and Michael Mitzenmacher.
-pub struct Bloom {
+pub struct Bloom<T: BloomHasher> {
     bits: Box<[BitsType]>,
     // cached to avoid recomputation
     bits_size: u64,
     hash_count: u32,
+    hasher: T,
 }
 
-impl Bloom {
+impl<T: BloomHasher> Bloom<T> {
     /// Rounds float to the next multiple of the `BitsType` bit width.
     #[inline(always)]
     fn roundf_to_bits_type_size(num: f64) -> f64 {
@@ -21,7 +22,7 @@ impl Bloom {
 
     /// Rounds integer to the next multiple of the `BitsType` bit width.
     ///
-    /// This function uses a trick for powers of 2. Unsined integer bit sizes
+    /// This function uses a trick for powers of 2. Unsigned integer bit sizes
     /// are almost always powers of 2.
     #[inline(always)]
     fn roundi_to_bits_type_size(num: u64) -> u64 {
@@ -71,7 +72,7 @@ impl Bloom {
     /// Create a new `Bloom` object with the target parameters.
     /// # Panic
     /// Panics if the allocation length cannot fit in a `usize`.
-    pub fn with_hints(size_hint: usize, p_false: f64) -> Self {
+    pub fn with_hints(size_hint: usize, p_false: f64, hasher: T) -> Self {
         let bit_size = Self::calc_size(size_hint, p_false);
         let bits_rounded = Self::roundi_to_bits_type_size(bit_size);
 
@@ -88,18 +89,21 @@ impl Bloom {
             bits,
             bits_size: bits_rounded,
             hash_count: n_hashes,
+            hasher,
         }
     }
 
     /// Computes a 128-bit hash for the given data.
-    fn hash_bytes(&self, data: &[u8]) -> (u64, u64) {
-        let res = xxh3_128(data);
+    fn hash_bytes<R>(&self, data: R) -> (u64, u64)
+    where
+        R: AsRef<[u8]>,
+    {
+        let (h1, mut h2) = self.hasher.hash_bytes(data);
 
-        let h1 = (res >> 64) as u64;
         // We ensure that h2 is odd so it is coprime with 2^BitsType::BITS.
         // This avoids strides (h2) that "skip" parts of the bit space to
         // create a smaller possible output space for an input.
-        let h2 = (res as u64) | 0x1;
+        h2 = (h2 as u64) | 0x1;
 
         (h1, h2)
     }
@@ -117,7 +121,10 @@ impl Bloom {
 
     /// Returns whether the data PROBABLY exists in the set or if it
     /// definitely does not exist.
-    pub fn contains<T: AsRef<[u8]>>(&self, data: T) -> bool {
+    pub fn contains<R>(&self, data: R) -> bool
+    where
+        R: AsRef<[u8]>,
+    {
         let data_ref = data.as_ref();
         let (h1, h2) = self.hash_bytes(data_ref);
 
@@ -137,7 +144,10 @@ impl Bloom {
 
     /// Adds the data to the set. An element can not be removed after
     /// being added.
-    pub fn insert<T: AsRef<[u8]>>(&mut self, data: T) {
+    pub fn insert<R>(&mut self, data: R)
+    where
+        R: AsRef<[u8]>,
+    {
         let data_ref = data.as_ref();
         let (h1, h2) = self.hash_bytes(data_ref);
 
