@@ -14,8 +14,9 @@ pub trait Hasher {
     fn serialize(&self) -> Result<Box<[u8]>, Self::SerializeError>;
 
     /// Reconstructs the hasher from a serialized exported state.
-    fn from_serialized(state: Box<[u8]>) -> Result<Self, Self::DeserializeError>
+    fn from_serialized<R>(state: R) -> Result<Self, Self::DeserializeError>
     where
+        R: AsRef<[u8]>,
         Self: Sized;
 }
 
@@ -78,10 +79,16 @@ impl Hasher for XxHasher {
         Ok(self.secret.clone())
     }
 
-    fn from_serialized(state: Box<[u8]>) -> Result<Self, Self::DeserializeError> {
-        if state.len() < XXH_SECRET_SIZE_MIN {
-            return Err(XxHasherError::BufferTooShort { size: state.len() });
+    fn from_serialized<R>(state: R) -> Result<Self, Self::DeserializeError>
+    where
+        R: AsRef<[u8]>,
+    {
+        let state_ref = state.as_ref().to_owned().into_boxed_slice();
+        if state_ref.len() < XXH_SECRET_SIZE_MIN {
+            return Err(XxHasherError::BufferTooShort {
+                size: state_ref.len(),
+            });
         }
-        Ok(Self { secret: state })
+        Ok(Self { secret: state_ref })
     }
 }
