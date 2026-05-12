@@ -1,17 +1,39 @@
 use crate::hash::Hasher;
+use core::mem;
 
 type BitsType = u64;
 
 /// This implementation of the bloom filter uses ideas from the paper at
 /// `https://doi.org/10.1002/rsa.20208 Digital Object Identifier (DOI)``
 /// by Adam Kirsch and Michael Mitzenmacher.
+///
+/// # Serialization
+/// The serialization format is as below
+/// [16 bytes] magic
+/// [1 byte]  version         
+/// [4 bytes] hash_num: u32 LE
+/// [4 bytes] hasher_len: u32 LE
+/// [N bytes] hasher_data
+/// [8 bytes] bits_num: u64 LE
+/// [M bytes] bits_data
 pub struct Bloom<T: Hasher> {
     bits: Box<[BitsType]>,
     // cached to avoid recomputation
-    bits_size: u64,
-    hash_count: u32,
+    bits_num: u64,
+    hash_num: u32,
     hasher: T,
 }
+
+#[derive(Debug)]
+pub enum DeserializeError<T: Hasher> {
+    InvalidMagic,
+    InvalidVersion,
+    HasherError(T::DeserializeError),
+    BufferTooShort { need: usize, have: usize },
+}
+
+const MAGIC: &[u8; 16] = b"BloomFile\x00\x00\x00\x00\x00\x00\x00";
+const VERSION: u8 = 1;
 
 impl<T: Hasher> Bloom<T> {
     /// Rounds float to the next multiple of the `BitsType` bit width.
@@ -87,8 +109,8 @@ impl<T: Hasher> Bloom<T> {
 
         Bloom {
             bits,
-            bits_size: bits_rounded,
-            hash_count: n_hashes,
+            bits_num: bits_rounded,
+            hash_num: n_hashes,
             hasher,
         }
     }
@@ -115,7 +137,7 @@ impl<T: Hasher> Bloom<T> {
         let h_combined = h1.wrapping_add((i as u64).wrapping_mul(h2));
 
         // fastrange to avoid modulo
-        ((h_combined as u128 * self.bits_size as u128) >> 64) as u64
+        ((h_combined as u128 * self.bits_num as u128) >> 64) as u64
     }
 
     /// Returns whether the data PROBABLY exists in the set or if it
@@ -127,7 +149,7 @@ impl<T: Hasher> Bloom<T> {
         let data_ref = data.as_ref();
         let (h1, h2) = self.hash_bytes(data_ref);
 
-        for i in 0..self.hash_count {
+        for i in 0..self.hash_num {
             let bit_idx = self.bit_index(h1, h2, i);
 
             let elem_idx = bit_idx >> BitsType::BITS.trailing_zeros();
@@ -150,7 +172,7 @@ impl<T: Hasher> Bloom<T> {
         let data_ref = data.as_ref();
         let (h1, h2) = self.hash_bytes(data_ref);
 
-        for i in 0..self.hash_count {
+        for i in 0..self.hash_num {
             let bit_idx = self.bit_index(h1, h2, i);
 
             let elem_idx = bit_idx >> BitsType::BITS.trailing_zeros();
@@ -161,12 +183,102 @@ impl<T: Hasher> Bloom<T> {
     }
 
     /// Returns the number of hash functions being used.
-    pub fn hash_count(&self) -> u32 {
-        self.hash_count
+    pub fn hash_num(&self) -> u32 {
+        self.hash_num
     }
 
     /// Returns the total number of bits in the filter.
-    pub fn bits_size(&self) -> u64 {
-        self.bits_size
+    pub fn bits_num(&self) -> u64 {
+        self.bits_num
+    }
+
+    pub fn serialize(&self) -> Result<Box<[u8]>, T::SerializeError> {
+        let hasher_bytes = self.hasher.serialize()?;
+        assert!(
+            hasher_bytes.len() as u64 <= u32::MAX as u64,
+            "Serialized hasher must be <= u32::MAX"
+        );
+
+        let mut buf = Vec::new();
+
+        buf.extend_from_slice(MAGIC);
+        buf.push(VERSION);
+
+        // hasher
+        buf.extend_from_slice(&self.hash_num.to_le_bytes());
+        buf.extend_from_slice(&(hasher_bytes.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&hasher_bytes);
+
+        // data
+        buf.extend_from_slice(&self.bits_num.to_le_bytes());
+
+        for &word in self.bits.iter() {
+            buf.extend_from_slice(&word.to_le_bytes());
+        }
+
+        Ok(buf.into_boxed_slice())
+    }
+
+    pub fn deserialize<R>(serialized: R) -> Result<Self, DeserializeError<T>>
+    where
+        R: AsRef<[u8]>,
+    {
+        let buf = serialized.as_ref();
+        let mut pos = 0;
+
+        macro_rules! read {
+            ($n:expr) => {{
+                let end = pos + $n;
+                if end > buf.len() {
+                    return Err(DeserializeError::BufferTooShort {
+                        need: end,
+                        have: buf.len(),
+                    });
+                }
+                let slice = &buf[pos..end];
+                pos = end;
+                slice
+            }};
+        }
+
+        if read!(MAGIC.len()) != MAGIC {
+            return Err(DeserializeError::InvalidMagic);
+        }
+
+        if read!(1)[0] != VERSION {
+            return Err(DeserializeError::InvalidVersion);
+        }
+
+        // hasher
+        let hasher_num = u32::from_le_bytes(read!(4).try_into().unwrap());
+        let hasher_bytes_len = u32::from_le_bytes(read!(4).try_into().unwrap());
+        let hasher_bytes = read!(hasher_bytes_len as usize);
+        let hasher =
+            T::from_serialized(hasher_bytes).map_err(|e| DeserializeError::HasherError(e))?;
+
+        // bits
+        let bits_num = u64::from_le_bytes(read!(8).try_into().unwrap());
+
+        let elem_size = mem::size_of::<BitsType>();
+        let remaining = buf.len() - pos;
+        if remaining % elem_size != 0 {
+            return Err(DeserializeError::BufferTooShort {
+                // nearest valid length. original could have had more
+                need: pos + elem_size - (remaining % elem_size),
+                have: buf.len(),
+            });
+        }
+
+        let mut bits_buf: Vec<BitsType> = vec![0; remaining / elem_size];
+        for word in bits_buf.iter_mut() {
+            *word = u64::from_le_bytes(read!(elem_size).try_into().unwrap());
+        }
+
+        Ok(Bloom {
+            bits: bits_buf.into_boxed_slice(),
+            bits_num,
+            hash_num: hasher_num,
+            hasher,
+        })
     }
 }
