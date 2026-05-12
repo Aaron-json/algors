@@ -53,9 +53,9 @@ fn test_statistical_false_positive_rate() {
 
     let actual_fpr = false_positives as f64 / n as f64;
 
-    // Tightened bound: 1.2x of target.
-    // With 100k samples, 3 standard deviations is roughly 1.1x,
-    // so 1.2x is a very safe but much tighter bound.
+    // bound of 1.2x of target.
+    // With 100k samples, 3 standard deviations is about 1.1x,
+    // so 1.2x is sensible but still tight enough
     assert!(
         actual_fpr <= p_target * 1.2,
         "FPR too high: target {}, actual {} ({} hits)",
@@ -84,14 +84,14 @@ fn test_large_capacity_overflow_safety() {
     bloom.contains(item);
 
     // check that the bitset was actually sized up correctly
-    assert!(bloom.bits_size() > size_hint as u64);
+    assert!(bloom.bits_num() > size_hint as u64);
 }
 
 #[test]
 fn test_hash_count_sanity() {
     // For n=1000, p=0.01, k should be approximately 7.
     let bloom = Bloom::with_hints(1000, 0.01, test_hasher());
-    assert!(bloom.hash_count() >= 6 && bloom.hash_count() <= 8);
+    assert!(bloom.hash_num() >= 6 && bloom.hash_num() <= 8);
 }
 
 // Property-based testing for a wide range of sizes and FPRs
