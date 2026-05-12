@@ -83,12 +83,12 @@ impl Hasher for XxHasher {
     where
         R: AsRef<[u8]>,
     {
-        let state_ref = state.as_ref().to_owned().into_boxed_slice();
-        if state_ref.len() < XXH_SECRET_SIZE_MIN {
+        let state_copy = Vec::from(state.as_ref()).into_boxed_slice();
+        if state_copy.len() < XXH_SECRET_SIZE_MIN {
             return Err(XxHasherError::BufferTooShort {
-                size: state_ref.len(),
+                size: state_copy.len(),
             });
         }
-        Ok(Self { secret: state_ref })
+        Ok(Self { secret: state_copy })
     }
 }
