@@ -8,9 +8,9 @@ type BitsType = u64;
 /// by Adam Kirsch and Michael Mitzenmacher.
 ///
 /// # Serialization
-/// The serialization format is as below
+/// The serialization format is as below:
 /// [16 bytes] magic
-/// [1 byte]  version         
+/// [1 byte]  version
 /// [4 bytes] hash_num: u32 LE
 /// [4 bytes] hasher_len: u32 LE
 /// [N bytes] hasher_data
@@ -25,10 +25,10 @@ pub struct Bloom<T: Hasher> {
 }
 
 #[derive(Debug)]
-pub enum DeserializeError<T: Hasher> {
+pub enum DeserializeError<E> {
     InvalidMagic,
     InvalidVersion,
-    HasherError(T::DeserializeError),
+    HasherError(E),
     BufferTooShort { need: usize, have: usize },
 }
 
@@ -198,8 +198,11 @@ impl<T: Hasher> Bloom<T> {
             hasher_bytes.len() as u64 <= u32::MAX as u64,
             "Serialized hasher must be <= u32::MAX"
         );
+        // magic + version + hash_num + hasher_len + hasher + bits_num + bits
+        let bits_len = self.bits.len() * mem::size_of::<BitsType>();
+        let total_len: usize = MAGIC.len() + 1 + 4 + 4 + hasher_bytes.len() + 8 + bits_len;
 
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(total_len);
 
         buf.extend_from_slice(MAGIC);
         buf.push(VERSION);
@@ -219,7 +222,7 @@ impl<T: Hasher> Bloom<T> {
         Ok(buf.into_boxed_slice())
     }
 
-    pub fn deserialize<R>(serialized: R) -> Result<Self, DeserializeError<T>>
+    pub fn deserialize<R>(serialized: R) -> Result<Self, DeserializeError<T::DeserializeError>>
     where
         R: AsRef<[u8]>,
     {
@@ -265,6 +268,13 @@ impl<T: Hasher> Bloom<T> {
             return Err(DeserializeError::BufferTooShort {
                 // nearest valid length. original could have had more
                 need: pos + elem_size - (remaining % elem_size),
+                have: buf.len(),
+            });
+        }
+        let expected_rem_size = (bits_num / BitsType::BITS as u64) * elem_size as u64;
+        if remaining as u64 != expected_rem_size {
+            return Err(DeserializeError::BufferTooShort {
+                need: pos + expected_rem_size as usize,
                 have: buf.len(),
             });
         }
