@@ -1,8 +1,9 @@
 [workspace]
 members = [
     "algors-utils",
-    "algors-queue", 
+    "algors-queue",
     "algors-bloom",
     "algors-union-find",
+    "algors-trie",
 ]
 resolver = "2"
