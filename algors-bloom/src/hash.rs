@@ -47,7 +47,7 @@ impl core::error::Error for XxHasherError {}
 /// XXH3 implementation using a custom secret buffer.
 ///
 /// Accepts a user generated secret to prevent collision attacks.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct XxHasher {
     secret: Box<[u8]>,
 }

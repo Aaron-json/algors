@@ -1,5 +1,6 @@
 use crate::hash::Hasher;
 use core::mem;
+use core::{error, fmt};
 
 type BitsType = u64;
 
@@ -16,6 +17,7 @@ type BitsType = u64;
 /// [N bytes] hasher_data
 /// [8 bytes] bits_num: u64 LE
 /// [M bytes] bits_data
+#[derive(Debug)]
 pub struct Bloom<T: Hasher> {
     bits: Box<[BitsType]>,
     // cached to avoid recomputation
@@ -31,6 +33,21 @@ pub enum DeserializeError<E> {
     HasherError(E),
     BufferTooShort { need: usize, have: usize },
 }
+
+impl<E: fmt::Display> fmt::Display for DeserializeError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidMagic => write!(f, "invalid magic string"),
+            Self::InvalidVersion => write!(f, "unsupported version"),
+            Self::HasherError(e) => write!(f, "hasher error: {}", e),
+            Self::BufferTooShort { need, have } => {
+                write!(f, "buffer too short; need {} bytes, have {}", need, have)
+            }
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> error::Error for DeserializeError<E> {}
 
 const MAGIC: &[u8; 16] = b"BloomFile\x00\x00\x00\x00\x00\x00\x00";
 const VERSION: u8 = 1;
@@ -262,16 +279,21 @@ impl<T: Hasher> Bloom<T> {
         // bits
         let bits_num = u64::from_le_bytes(read!(8).try_into().unwrap());
 
-        let elem_size = mem::size_of::<BitsType>();
-        let remaining = buf.len() - pos;
-        if remaining % elem_size != 0 {
+        // We expect bits_num to be a multiple of BitsType::BITS (64) because
+        // it is rounded up during creation
+        if bits_num == 0 || bits_num % BitsType::BITS as u64 != 0 {
             return Err(DeserializeError::BufferTooShort {
-                // nearest valid length. original could have had more
-                need: pos + elem_size - (remaining % elem_size),
+                // This is a bit of a hack to mean invalid data since we don't
+                // have a dedicated "InvalidData" error
+                need: pos + ((bits_num + 63) / 64 * 8) as usize,
                 have: buf.len(),
             });
         }
+
+        let elem_size = mem::size_of::<BitsType>();
+        let remaining = buf.len() - pos;
         let expected_rem_size = (bits_num / BitsType::BITS as u64) * elem_size as u64;
+
         if remaining as u64 != expected_rem_size {
             return Err(DeserializeError::BufferTooShort {
                 need: pos + expected_rem_size as usize,
