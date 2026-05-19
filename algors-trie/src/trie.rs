@@ -1,5 +1,7 @@
+use crate::prefix::Prefix;
+
 struct Node {
-    prefix: Box<[u8]>,
+    prefix: Prefix,
     bitmap: Option<Box<[u64; 4]>>,
     children: Option<Vec<Box<Node>>>,
 }
@@ -14,9 +16,8 @@ impl Trie {
 
     #[inline]
     fn new_node(prefix: &[u8]) -> Box<Node> {
-        let pref_copy = prefix.to_vec().into_boxed_slice();
         Box::new(Node {
-            prefix: pref_copy,
+            prefix: Prefix::new(prefix),
             bitmap: None,
             children: None,
         })
@@ -82,12 +83,13 @@ impl Trie {
         loop {
             let lcp_len = Self::lcp(cur_node.prefix.as_ref(), cur_data);
             if lcp_len < cur_node.prefix.len() {
-                let mut split_node = Self::new_node(&cur_node.prefix[lcp_len..]);
+                let cur_node_prefix = cur_node.prefix.as_ref();
+                let mut split_node = Self::new_node(&cur_node_prefix[lcp_len..]);
                 split_node.children = cur_node.children.take();
                 split_node.bitmap = cur_node.bitmap.take();
-                let split_node_byte = split_node.prefix[0];
 
-                cur_node.prefix = cur_node.prefix[..lcp_len].to_vec().into_boxed_slice();
+                let split_node_byte = split_node.prefix.as_ref()[0];
+                cur_node.prefix = Prefix::new(&cur_node_prefix[..lcp_len]);
 
                 let mut new_bitmap = Box::new([0u64; 4]);
                 let (idx, bit) = Self::bit_index(split_node_byte);
