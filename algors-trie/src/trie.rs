@@ -39,28 +39,27 @@ impl Trie {
     /// This function ALWAYS assumes that the child exists to avoid duplicate
     /// checks.
     /// You must first check that the child exists.
-    fn child_idx_from_byte(bitmap: &[u64; 4], byte: u8) -> usize {
-        let (idx, bit) = Self::bit_index(byte);
+    #[inline]
+    fn child_idx_from_bit(bitmap: &[u64; 4], idx: usize, bit: u8) -> usize {
+        // eliminate bounds checks
+        let safe_idx = idx & 3;
 
-        // find the total number of nodes in the array that are before
-        // this byte's node
-        let mut pos = 0;
-        let mut i = 0;
-        while i < idx {
-            pos += bitmap[i].count_ones();
-            i += 1;
-        }
+        // avoids branching.
+        // on ARM this relies on NEON (CNT) which is mandatory for aarch64.
+        // on x86 this relies on SSE(4.2) (POPCOUNT) in the SSE 4.2 and is present
+        // since x86-64-v2.
+        let before = (safe_idx > 0) as u32 * bitmap[0].count_ones()
+            + (safe_idx > 1) as u32 * bitmap[1].count_ones()
+            + (safe_idx > 2) as u32 * bitmap[2].count_ones();
 
-        // mask off the bits after the current one
-        let mask = (1 << bit) - 1;
-        pos += (bitmap[idx] & mask).count_ones();
+        let mask = (1u64 << bit) - 1;
+        let current = (bitmap[safe_idx] & mask) as u32;
 
-        pos as usize
+        (before + current) as usize
     }
 
     #[inline(always)]
-    fn child_exists(bitmap: &[u64; 4], byte: u8) -> bool {
-        let (idx, bit) = Self::bit_index(byte);
+    fn child_exists(bitmap: &[u64; 4], idx: usize, bit: u8) -> bool {
         bitmap[idx] & (1 << bit) != 0
     }
 
@@ -114,14 +113,14 @@ impl Trie {
             let children = cur_node.children.as_mut().unwrap();
             let bitmap = cur_node.bitmap.as_mut().unwrap();
             let (idx, bit) = Self::bit_index(byte);
-            if Self::child_exists(bitmap, byte) {
-                let child_idx = Self::child_idx_from_byte(bitmap, byte);
+            if Self::child_exists(bitmap, idx, bit) {
+                let child_idx = Self::child_idx_from_bit(bitmap, idx, bit);
                 cur_node = &mut children[child_idx];
             } else {
                 // no child exists with this byte prefix
                 let new_child = Self::new_node(cur_data);
                 bitmap[idx] |= 1 << bit;
-                let child_idx = Self::child_idx_from_byte(bitmap, byte);
+                let child_idx = Self::child_idx_from_bit(bitmap, idx, bit);
                 children.insert(child_idx, new_child);
                 return;
             }
