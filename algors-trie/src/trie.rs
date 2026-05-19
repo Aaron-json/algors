@@ -2,7 +2,7 @@ use crate::prefix::Prefix;
 
 struct Node {
     prefix: Prefix,
-    bitmap: Option<Box<[u64; 4]>>,
+    bitmap: [u64; 4],
     children: Option<Vec<Box<Node>>>,
 }
 struct Trie {
@@ -14,11 +14,11 @@ impl Trie {
         Self { root: None }
     }
 
-    #[inline]
+    #[inline(always)]
     fn new_node(prefix: &[u8]) -> Box<Node> {
         Box::new(Node {
             prefix: Prefix::new(prefix),
-            bitmap: None,
+            bitmap: [0; 4],
             children: None,
         })
     }
@@ -46,7 +46,7 @@ impl Trie {
 
         // avoids branching.
         // on ARM this relies on NEON (CNT) which is mandatory for aarch64.
-        // on x86 this relies on SSE(4.2) (POPCOUNT) in the SSE 4.2 and is present
+        // on x86 this relies on SSE(4.2) (POPCOUNT` in the SSE 4.2 and is present
         // since x86-64-v2.
         let before = (safe_idx > 0) as u32 * bitmap[0].count_ones()
             + (safe_idx > 1) as u32 * bitmap[1].count_ones()
@@ -85,16 +85,15 @@ impl Trie {
                 let cur_node_prefix = cur_node.prefix.as_ref();
                 let mut split_node = Self::new_node(&cur_node_prefix[lcp_len..]);
                 split_node.children = cur_node.children.take();
-                split_node.bitmap = cur_node.bitmap.take();
+                split_node.bitmap = cur_node.bitmap;
 
                 let split_node_byte = split_node.prefix.as_ref()[0];
                 cur_node.prefix = Prefix::new(&cur_node_prefix[..lcp_len]);
 
-                let mut new_bitmap = Box::new([0u64; 4]);
+                cur_node.bitmap = [0u64; 4];
                 let (idx, bit) = Self::bit_index(split_node_byte);
-                new_bitmap[idx] |= 1 << bit;
+                cur_node.bitmap[idx] |= 1 << bit;
 
-                cur_node.bitmap = Some(new_bitmap);
                 cur_node.children = Some(vec![split_node]);
             }
 
@@ -105,13 +104,8 @@ impl Trie {
 
             cur_data = &cur_data[lcp_len..];
             let byte = cur_data[0];
-            if cur_node.bitmap.is_none() {
-                cur_node.bitmap = Some(Box::new([0u64; 4]));
-                // if there are no children we will for sure add one
-                cur_node.children = Some(Vec::with_capacity(1));
-            }
             let children = cur_node.children.as_mut().unwrap();
-            let bitmap = cur_node.bitmap.as_mut().unwrap();
+            let bitmap = &mut cur_node.bitmap;
             let (idx, bit) = Self::bit_index(byte);
             if Self::child_exists(bitmap, idx, bit) {
                 let child_idx = Self::child_idx_from_bit(bitmap, idx, bit);
