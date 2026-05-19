@@ -47,6 +47,7 @@ impl Trie {
         let mut i = 0;
         while i < idx {
             pos += bitmap[i].count_ones();
+            i += 1;
         }
 
         // mask off the bits after the current one
