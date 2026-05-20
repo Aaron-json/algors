@@ -55,7 +55,7 @@ impl Trie {
             + (safe_idx > 2) as u32 * bitmap[2].count_ones();
 
         let mask = (1u64 << bit) - 1;
-        let current = (bitmap[safe_idx] & mask) as u32;
+        let current = (bitmap[safe_idx] & mask).count_ones();
 
         (before + current) as usize
     }
