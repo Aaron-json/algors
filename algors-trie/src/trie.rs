@@ -1,4 +1,5 @@
 use crate::prefix::Prefix;
+use crate::util;
 use core::mem;
 
 struct Node {
@@ -81,7 +82,7 @@ impl Trie {
         let mut cur_data = data_ref;
         let mut cur_node = self.root.as_mut().unwrap();
         loop {
-            let lcp_len = Self::lcp(cur_node.prefix.as_ref(), cur_data);
+            let lcp_len = util::lcp(cur_node.prefix.as_ref(), cur_data);
             if lcp_len < cur_node.prefix.len() {
                 let cur_node_prefix = cur_node.prefix.as_ref();
                 let mut split_node = Self::new_node(&cur_node_prefix[lcp_len..]);
@@ -122,36 +123,21 @@ impl Trie {
         }
     }
 
-    fn lcp(buf1: &[u8], buf2: &[u8]) -> usize {
-        let len = core::cmp::min(buf1.len(), buf2.len());
-
-        let mut i = 0;
-        let p1 = buf1.as_ptr();
-        let p2 = buf2.as_ptr();
-
-        while i + 8 <= len {
-            unsafe {
-                let x = u64::from_ne_bytes(p1.add(i).cast::<[u8; 8]>().read_unaligned());
-                let y = u64::from_ne_bytes(p2.add(i).cast::<[u8; 8]>().read_unaligned());
-
-                if x != y {
-                    // find the first byte that is different
-                    let diff = x ^ y;
-                    #[cfg(target_endian = "little")]
-                    return i + (diff.trailing_zeros() as usize / 8);
-                    #[cfg(target_endian = "big")]
-                    return i + (diff.leading_zeros() as usize / 8);
-                }
-            }
-            i += 8;
+    pub fn contains<R>(&self, data: R) -> bool
+    where
+        R: AsRef<[u8]>,
+    {
+        let data_ref = data.as_ref();
+        if data_ref.is_empty() {
+            return false;
         }
 
-        while i < len {
-            if buf1[i] != buf2[i] {
-                return i;
-            }
-            i += 1;
+        if let None = self.root {
+            return false;
         }
-        len
+
+        let cur_node = self.root.as_ref().unwrap();
+        let cur_data = data_ref;
+        unreachable!()
     }
 }
