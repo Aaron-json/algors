@@ -1,12 +1,13 @@
 use crate::prefix::Prefix;
+use core::mem;
 
 struct Node {
     prefix: Prefix,
     bitmap: [u64; 4],
-    children: Option<Vec<Box<Node>>>,
+    children: Vec<Node>,
 }
 struct Trie {
-    root: Option<Box<Node>>,
+    root: Option<Node>,
 }
 
 impl Trie {
@@ -15,12 +16,12 @@ impl Trie {
     }
 
     #[inline(always)]
-    fn new_node(prefix: &[u8]) -> Box<Node> {
-        Box::new(Node {
+    fn new_node(prefix: &[u8]) -> Node {
+        Node {
             prefix: Prefix::new(prefix),
             bitmap: [0; 4],
-            children: None,
-        })
+            children: Vec::new(),
+        }
     }
 
     /// Returns (idx, bit) pair.
@@ -84,7 +85,7 @@ impl Trie {
             if lcp_len < cur_node.prefix.len() {
                 let cur_node_prefix = cur_node.prefix.as_ref();
                 let mut split_node = Self::new_node(&cur_node_prefix[lcp_len..]);
-                split_node.children = cur_node.children.take();
+                split_node.children = mem::take(&mut cur_node.children);
                 split_node.bitmap = cur_node.bitmap;
 
                 let split_node_byte = split_node.prefix.as_ref()[0];
@@ -94,7 +95,7 @@ impl Trie {
                 let (idx, bit) = Self::bit_index(split_node_byte);
                 cur_node.bitmap[idx] |= 1 << bit;
 
-                cur_node.children = Some(vec![split_node]);
+                cur_node.children = vec![split_node];
             }
 
             if lcp_len == cur_data.len() {
@@ -104,7 +105,7 @@ impl Trie {
 
             cur_data = &cur_data[lcp_len..];
             let byte = cur_data[0];
-            let children = cur_node.children.as_mut().unwrap();
+            let children = &mut cur_node.children;
             let bitmap = &mut cur_node.bitmap;
             let (idx, bit) = Self::bit_index(byte);
             if Self::child_exists(bitmap, idx, bit) {
