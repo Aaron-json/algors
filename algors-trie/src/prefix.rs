@@ -17,35 +17,38 @@ const TAG_LEN_BYTE: usize = if cfg!(target_endian = "little") {
     PREFIX_SIZE - 1
 };
 
-// Byte offset to the start of the pointer when data is heap allocated.
 const POINTER_OFFSET: usize = if cfg!(target_endian = "little") {
     0
 } else {
     PREFIX_SIZE - PTR_SIZE
 };
 
-// Offset to the length byte. Only used in the non inlined variant.
+// Only used in the non inlined variant.
 // When data is inlined, the length is packed into the tag byte
 // to maximize space for inlining.
-const LEN_OFFSET: usize = if cfg!(target_endian = "little") {
+const ALLOC_LEN_OFFSET: usize = if cfg!(target_endian = "little") {
     PTR_SIZE
 } else {
     PREFIX_SIZE - PTR_SIZE - USIZE_SIZE
 };
 
-// Index of the start of the inlined data. Obviously only used when
-// inlining data
+// Obviously only used when the prefix is inlined.
 const INLINE_DATA_OFFSET: usize = if cfg!(target_endian = "little") { 1 } else { 0 };
 
 /// A compact prefix that avoids heap allocations for small prefixes.
 /// Small prefixes are stored inline and larger ones are heap allocated
 pub struct Prefix {
+    // Forces alignment to the native pointer size to avoid
+    // unaligned accesses at runtime which might be slower
+    // on some systems.
+    _align: [*mut u8; 0],
     bytes: [u8; PREFIX_SIZE],
 }
 
 impl Prefix {
     pub fn new(data: &[u8]) -> Self {
         let mut res = Self {
+            _align: [],
             bytes: [0u8; PREFIX_SIZE],
         };
         let len = data.len();
@@ -69,7 +72,10 @@ impl Prefix {
                     alloc::handle_alloc_error(layout);
                 }
                 ptr::copy_nonoverlapping(data.as_ptr(), pt, len);
-                ptr::write_unaligned(res.bytes.as_mut_ptr().add(LEN_OFFSET) as *mut usize, len);
+                ptr::write_unaligned(
+                    res.bytes.as_mut_ptr().add(ALLOC_LEN_OFFSET) as *mut usize,
+                    len,
+                );
                 ptr::write_unaligned(
                     res.bytes.as_mut_ptr().add(POINTER_OFFSET) as *mut *mut u8,
                     pt,
@@ -91,7 +97,7 @@ impl Prefix {
 
     #[inline(always)]
     fn len_alloc(&self) -> usize {
-        unsafe { (self.bytes.as_ptr().add(LEN_OFFSET) as *const usize).read_unaligned() }
+        unsafe { (self.bytes.as_ptr().add(ALLOC_LEN_OFFSET) as *const usize).read_unaligned() }
     }
 
     /// Returns the pointer to the heap allocated data.
