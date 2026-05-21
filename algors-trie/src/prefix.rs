@@ -1,53 +1,112 @@
-use core::mem;
+use alloc::alloc;
+use core::{mem, ptr, slice};
 
-#[derive(Clone, Copy)]
-struct Inline {
-    // stores the length in the first 7 bits and the variant tag in the
-    // least significant bit.
-    len_tag: u8,
-    data: [u8; 15],
-}
-// A compact prefix that avoids heap allocations for prefixes under 16 bytes.
-pub union Prefix {
-    alloc: mem::ManuallyDrop<Box<[u8]>>,
-    inline: Inline,
+// To avoid heap allocating small prefixes on the heap, we only
+// when we cannot store the prefix inline.
+
+const PREFIX_SIZE: usize = 16;
+const INLINE_CAP: usize = PREFIX_SIZE - 1;
+const PTR_SIZE: usize = mem::size_of::<*const u8>();
+const USIZE_SIZE: usize = mem::size_of::<usize>();
+
+// Index of the byte that stores the tag (length when inlining).
+// Must overlap with the pointer's Least significant Byte.
+const TAG_LEN_BYTE: usize = if cfg!(target_endian = "little") {
+    0
+} else {
+    PREFIX_SIZE - 1
+};
+
+// Byte offset to the start of the pointer when data is heap allocated.
+const POINTER_OFFSET: usize = if cfg!(target_endian = "little") {
+    0
+} else {
+    PREFIX_SIZE - PTR_SIZE
+};
+
+// Offset to the length byte. Only used in the non inlined variant.
+// When data is inlined, the length is packed into the tag byte
+// to maximize space for inlining.
+const LEN_OFFSET: usize = if cfg!(target_endian = "little") {
+    PTR_SIZE
+} else {
+    PREFIX_SIZE - PTR_SIZE - USIZE_SIZE
+};
+
+// Index of the start of the inlined data. Obviously only used when
+// inlining data
+const INLINE_DATA_OFFSET: usize = if cfg!(target_endian = "little") { 1 } else { 0 };
+
+/// A compact prefix that avoids heap allocations for small prefixes.
+/// Small prefixes are stored inline and larger ones are heap allocated
+pub struct Prefix {
+    bytes: [u8; PREFIX_SIZE],
 }
 
 impl Prefix {
     pub fn new(data: &[u8]) -> Self {
+        let mut res = Self {
+            bytes: [0u8; PREFIX_SIZE],
+        };
         let len = data.len();
-        if len < 16 {
-            let mut res = Self {
-                inline: Inline {
-                    len_tag: ((len as u8) << 1) | 0x1,
-                    data: [0u8; 15],
-                },
-            };
+        if len <= INLINE_CAP {
+            res.bytes[TAG_LEN_BYTE] = ((len << 1) as u8) | 0x1;
             unsafe {
-                res.inline.data[..len].copy_from_slice(data);
-            }
-
-            res
+                ptr::copy_nonoverlapping(
+                    data.as_ptr(),
+                    res.bytes.as_mut_ptr().add(INLINE_DATA_OFFSET),
+                    len,
+                );
+            };
         } else {
-            Self {
-                alloc: mem::ManuallyDrop::new(data.to_vec().into_boxed_slice()),
+            unsafe {
+                // Aligning by 2 bytes lets us use the last bit as the tag.
+                let layout = alloc::Layout::from_size_align(len, 2)
+                    .expect("Prefix layout could not be created");
+
+                let pt = alloc::alloc(layout);
+                if pt.is_null() {
+                    alloc::handle_alloc_error(layout);
+                }
+                ptr::copy_nonoverlapping(data.as_ptr(), pt, len);
+                ptr::write_unaligned(res.bytes.as_mut_ptr().add(LEN_OFFSET) as *mut usize, len);
+                ptr::write_unaligned(
+                    res.bytes.as_mut_ptr().add(POINTER_OFFSET) as *mut *mut u8,
+                    pt,
+                );
             }
         }
+        res
     }
 
     #[inline(always)]
     pub fn is_inline(&self) -> bool {
-        unsafe { self.inline.len_tag & 0x1 == 1 }
+        (self.bytes[TAG_LEN_BYTE] & 0x1) == 1
+    }
+
+    #[inline(always)]
+    fn len_inline(&self) -> usize {
+        (self.bytes[TAG_LEN_BYTE] >> 1) as usize
+    }
+
+    #[inline(always)]
+    fn len_alloc(&self) -> usize {
+        unsafe { (self.bytes.as_ptr().add(LEN_OFFSET) as *const usize).read_unaligned() }
+    }
+
+    /// Returns the pointer to the heap allocated data.
+    /// This can ONLY be called if this is the heap allocated variant.
+    #[inline(always)]
+    fn ptr_alloc(&self) -> *mut u8 {
+        unsafe { (self.bytes.as_ptr().add(POINTER_OFFSET) as *const *mut u8).read_unaligned() }
     }
 
     #[inline(always)]
     pub fn len(&self) -> usize {
-        unsafe {
-            if self.is_inline() {
-                (self.inline.len_tag >> 1) as usize
-            } else {
-                self.alloc.len()
-            }
+        if self.is_inline() {
+            self.len_inline()
+        } else {
+            self.len_alloc()
         }
     }
 
@@ -55,9 +114,10 @@ impl Prefix {
     pub fn as_ref(&self) -> &[u8] {
         unsafe {
             if self.is_inline() {
-                &self.inline.data[..self.len()]
+                let len = self.len_inline();
+                &self.bytes[INLINE_DATA_OFFSET..INLINE_DATA_OFFSET + len]
             } else {
-                self.alloc.as_ref()
+                slice::from_raw_parts(self.ptr_alloc(), self.len_alloc())
             }
         }
     }
@@ -67,7 +127,8 @@ impl Drop for Prefix {
     fn drop(&mut self) {
         unsafe {
             if !self.is_inline() {
-                mem::ManuallyDrop::drop(&mut self.alloc);
+                let layout = alloc::Layout::from_size_align(self.len_alloc(), 2).unwrap();
+                alloc::dealloc(self.ptr_alloc(), layout);
             }
         }
     }
