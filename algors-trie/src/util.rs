@@ -64,11 +64,11 @@ pub fn lcp(buf1: &[u8], buf2: &[u8]) -> usize {
         }
         return len;
     }
-    unsafe {
-        if p1.read() != p2.read() {
-            return 0;
-        } else {
-            return 1;
-        }
+    // Alignment is not an issue here since u8 have alignment of 1 so we can
+    // just read the first element.
+    if buf1[0] != buf2[0] {
+        return 0;
+    } else {
+        return 1;
     }
 }
