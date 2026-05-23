@@ -3,6 +3,7 @@ use core::{mem, ptr};
 
 const TAG_MASK: u8 = 0b111;
 const TAG_MAX: u8 = 0b111;
+const CAPACITY_MAX: usize = 256;
 
 /// BoundedRawVec is a growable array that only tracks its capacity and grows
 /// up to 256.
@@ -12,10 +13,6 @@ const TAG_MAX: u8 = 0b111;
 /// return memory that is at least 8 byte aligned, we can use the last 3 bits
 /// to store the size class of the allocation. Together will "Nullness" of the
 /// pointer, this gives us 9 possible states.
-///
-/// # Zero Sized Types
-/// This type does not have optimizations for zero sized types for simplicity.
-/// Our main use case does not benefit from this optimization.
 ///
 /// # Drop
 /// Since this type does not keep track of the length, it can not exhaustively
@@ -28,9 +25,18 @@ pub struct BoundedRawVec<T> {
 impl<T> BoundedRawVec<T> {
     #[inline(always)]
     pub fn new() -> Self {
-        Self {
-            tagged: ptr::null_mut(),
-        }
+        let ptr_val = if Self::is_zst() {
+            ptr::dangling_mut()
+        } else {
+            ptr::null_mut()
+        };
+        Self { tagged: ptr_val }
+    }
+
+    /// Checks whether the type stored is a Zero Sized Type.
+    #[inline(always)]
+    const fn is_zst() -> bool {
+        mem::size_of::<T>() == 0
     }
 
     /// This function returns the current value of the tag.
@@ -43,6 +49,9 @@ impl<T> BoundedRawVec<T> {
 
     #[inline(always)]
     fn capacity(&self) -> usize {
+        if Self::is_zst() {
+            return CAPACITY_MAX;
+        }
         if self.tagged.is_null() {
             0
         } else {
@@ -51,6 +60,7 @@ impl<T> BoundedRawVec<T> {
     }
 
     /// Returns the alignment of the pointer to the data
+    /// Must NOT be used on ZST since we do not control their pointer value.
     #[inline(always)]
     fn alignment() -> usize {
         // alignment must be at least 8 to use the last 3 bits
@@ -59,6 +69,12 @@ impl<T> BoundedRawVec<T> {
 
     #[inline(always)]
     fn as_mut_ptr(&self) -> *mut T {
+        if mem::size_of::<T>() == 0 {
+            // ZST dangling pointers do not go through the allocator and
+            // so we don't have control over their alignment
+            // We handle them as a special case.
+            return self.tagged;
+        }
         ((self.tagged as usize) & (!TAG_MASK as usize)) as *mut T
     }
 
@@ -81,6 +97,17 @@ impl<T> BoundedRawVec<T> {
     }
 
     pub fn insert(&mut self, i: usize, element: T, len: usize) {
+        if Self::is_zst() {
+            unsafe {
+                // ZST pointers are no-ops for writes/reads and arithmetic.
+                // We still need to write this to avoid dropping the element
+                // prematurely
+                let p = self.as_mut_ptr();
+                ptr::copy(p.add(i), p.add(i + 1), len - i);
+                ptr::write(p.add(i), element);
+            }
+            return;
+        }
         let cur_cap = self.capacity();
         let cur_tag = self.cap_tag();
         let mut ptr = self.as_mut_ptr();
@@ -132,6 +159,17 @@ impl<T> BoundedRawVec<T> {
         }
     }
     pub fn deallocate(&mut self, len: usize) {
+        // ZST never go through an allocator.
+        // We just need to drop
+        if Self::is_zst() {
+            for i in 0..len {
+                unsafe {
+                    self.as_mut_ptr().add(i).drop_in_place();
+                }
+            }
+            return;
+        }
+
         let ptr = self.as_mut_ptr();
         if ptr.is_null() {
             return;
@@ -152,9 +190,7 @@ impl<T> BoundedRawVec<T> {
 
 impl<T> Default for BoundedRawVec<T> {
     fn default() -> Self {
-        Self {
-            tagged: ptr::null_mut(),
-        }
+        Self::new()
     }
 }
 
