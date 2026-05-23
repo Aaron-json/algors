@@ -1,5 +1,4 @@
 use alloc::alloc;
-use core::ptr::NonNull;
 use core::{mem, ptr};
 
 const TAG_MASK: u8 = 0b111;
@@ -22,15 +21,15 @@ const TAG_MAX: u8 = 0b111;
 /// Since this type does not keep track of the length, it can not exhaustively
 /// implement Drop. Callers must call `deallocate` in their Drop
 /// implementations.
-struct BoundedRawVec<T> {
-    ptr: *mut T,
+pub struct BoundedRawVec<T> {
+    tagged: *mut T,
 }
 
 impl<T> BoundedRawVec<T> {
     #[inline(always)]
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            ptr: ptr::null_mut(),
+            tagged: ptr::null_mut(),
         }
     }
 
@@ -39,12 +38,12 @@ impl<T> BoundedRawVec<T> {
     /// same value although they might mean different things.
     #[inline(always)]
     fn cap_tag(&self) -> u8 {
-        ((self.ptr as usize) & (TAG_MASK as usize)) as u8
+        ((self.tagged as usize) & (TAG_MASK as usize)) as u8
     }
 
     #[inline(always)]
     fn capacity(&self) -> usize {
-        if self.ptr.is_null() {
+        if self.tagged.is_null() {
             0
         } else {
             1 << (self.cap_tag() + 1)
@@ -60,12 +59,12 @@ impl<T> BoundedRawVec<T> {
 
     #[inline(always)]
     fn as_mut_ptr(&self) -> *mut T {
-        ((self.ptr as usize) & (!TAG_MASK as usize)) as *mut T
+        ((self.tagged as usize) & (!TAG_MASK as usize)) as *mut T
     }
 
     #[inline(always)]
     pub fn get(&self, i: usize, len: usize) -> Option<&T> {
-        if self.ptr.is_null() || i >= len {
+        if self.tagged.is_null() || i >= len {
             None
         } else {
             unsafe { Some(&*self.as_mut_ptr().add(i)) }
@@ -73,15 +72,15 @@ impl<T> BoundedRawVec<T> {
     }
 
     #[inline(always)]
-    pub fn get_mut(&self, i: usize, len: usize) -> Option<&mut T> {
-        if self.ptr.is_null() || i >= len {
+    pub fn get_mut(&mut self, i: usize, len: usize) -> Option<&mut T> {
+        if self.tagged.is_null() || i >= len {
             None
         } else {
             unsafe { Some(&mut *self.as_mut_ptr().add(i)) }
         }
     }
 
-    fn insert(&mut self, i: usize, element: T, len: usize) {
+    pub fn insert(&mut self, i: usize, element: T, len: usize) {
         let cur_cap = self.capacity();
         let cur_tag = self.cap_tag();
         let mut ptr = self.as_mut_ptr();
@@ -121,7 +120,7 @@ impl<T> BoundedRawVec<T> {
                 }
 
                 ptr = new_ptr;
-                self.ptr = ((ptr as usize) | new_tag as usize) as *mut T;
+                self.tagged = ((ptr as usize) | new_tag as usize) as *mut T;
             }
         } else {
             unsafe {
@@ -147,7 +146,15 @@ impl<T> BoundedRawVec<T> {
             let layout = alloc::Layout::from_size_align(size, align).unwrap();
             alloc::dealloc(ptr as *mut u8, layout);
         }
-        self.ptr = ptr::null_mut();
+        self.tagged = ptr::null_mut();
+    }
+}
+
+impl<T> Default for BoundedRawVec<T> {
+    fn default() -> Self {
+        Self {
+            tagged: ptr::null_mut(),
+        }
     }
 }
 

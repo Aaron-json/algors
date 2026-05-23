@@ -1,12 +1,8 @@
+use crate::node::Node;
 use crate::prefix::Prefix;
 use crate::util;
 use core::mem;
 
-struct Node {
-    prefix: Prefix,
-    bitmap: [u64; 4],
-    children: Vec<Node>,
-}
 struct Trie {
     root: Option<Node>,
 }
@@ -14,55 +10,6 @@ struct Trie {
 impl Trie {
     pub fn new() -> Self {
         Self { root: None }
-    }
-
-    #[inline(always)]
-    fn new_node(prefix: &[u8]) -> Node {
-        Node {
-            prefix: Prefix::new(prefix),
-            bitmap: [0; 4],
-            children: Vec::new(),
-        }
-    }
-
-    /// Returns (idx, bit) pair.
-    #[inline(always)]
-    fn bit_index(byte: u8) -> (usize, u8) {
-        // divide by 64 to get the elememt index
-        let idx = byte >> 6;
-        // modulo to get the bit
-        let bit = byte & 63;
-
-        (idx as usize, bit)
-    }
-
-    /// Returns the index of the child, if exists, given the child's expected
-    /// first byte
-    /// This function ALWAYS assumes that the child exists to avoid duplicate
-    /// checks.
-    /// You must first check that the child exists.
-    #[inline]
-    fn child_idx_from_bit(bitmap: &[u64; 4], idx: usize, bit: u8) -> usize {
-        // eliminate bounds checks
-        let safe_idx = idx & 3;
-
-        // avoids branching.
-        // on ARM this relies on NEON (CNT) which is mandatory for aarch64.
-        // on x86 this relies on SSE(4.2) (POPCOUNT` in the SSE 4.2 and is present
-        // since x86-64-v2.
-        let before = (safe_idx > 0) as u32 * bitmap[0].count_ones()
-            + (safe_idx > 1) as u32 * bitmap[1].count_ones()
-            + (safe_idx > 2) as u32 * bitmap[2].count_ones();
-
-        let mask = (1u64 << bit) - 1;
-        let current = (bitmap[safe_idx] & mask).count_ones();
-
-        (before + current) as usize
-    }
-
-    #[inline(always)]
-    fn child_exists(bitmap: &[u64; 4], idx: usize, bit: u8) -> bool {
-        bitmap[idx] & (1 << bit) != 0
     }
 
     pub fn insert<R>(&mut self, data: R)
@@ -75,7 +22,7 @@ impl Trie {
         }
 
         if let None = self.root {
-            self.root = Some(Self::new_node(data_ref));
+            self.root = Some(Node::new(data_ref));
             return;
         }
 
@@ -84,19 +31,19 @@ impl Trie {
         loop {
             let lcp_len = util::lcp(cur_node.prefix.as_ref(), cur_data);
             if lcp_len < cur_node.prefix.len() {
+                // create new split node to become the child of the
+                // current node that inherits its children.
                 let cur_node_prefix = cur_node.prefix.as_ref();
-                let mut split_node = Self::new_node(&cur_node_prefix[lcp_len..]);
-                split_node.children = mem::take(&mut cur_node.children);
-                split_node.bitmap = cur_node.bitmap;
+                let mut split_node = Node::new(&cur_node_prefix[lcp_len..]);
 
-                let split_node_byte = split_node.prefix.as_ref()[0];
                 cur_node.prefix = Prefix::new(&cur_node_prefix[..lcp_len]);
+                cur_node.transfer_children(&mut split_node);
 
-                cur_node.bitmap = [0u64; 4];
-                let (idx, bit) = Self::bit_index(split_node_byte);
-                cur_node.bitmap[idx] |= 1 << bit;
+                // update the parent
+                let split_node_byte = split_node.prefix.as_ref()[0];
 
-                cur_node.children = vec![split_node];
+                // we just split the node so it has no children
+                cur_node.insert_child(Node::child_pos(split_node_byte), split_node);
             }
 
             if lcp_len == cur_data.len() {
@@ -106,18 +53,13 @@ impl Trie {
 
             cur_data = &cur_data[lcp_len..];
             let byte = cur_data[0];
-            let children = &mut cur_node.children;
-            let bitmap = &mut cur_node.bitmap;
-            let (idx, bit) = Self::bit_index(byte);
-            if Self::child_exists(bitmap, idx, bit) {
-                let child_idx = Self::child_idx_from_bit(bitmap, idx, bit);
-                cur_node = &mut children[child_idx];
+            let child_pos = Node::child_pos(byte);
+            if cur_node.child_exists(child_pos) {
+                cur_node = cur_node.get_mut_child(child_pos).unwrap();
             } else {
                 // no child exists with this byte prefix
-                let new_child = Self::new_node(cur_data);
-                bitmap[idx] |= 1 << bit;
-                let child_idx = Self::child_idx_from_bit(bitmap, idx, bit);
-                children.insert(child_idx, new_child);
+                let new_child = Node::new(cur_data);
+                cur_node.insert_child(child_pos, new_child);
                 return;
             }
         }
@@ -138,6 +80,12 @@ impl Trie {
 
         let cur_node = self.root.as_ref().unwrap();
         let cur_data = data_ref;
+        loop {
+            let lcp_len = util::lcp(cur_node.prefix.as_ref(), cur_data);
+            if lcp_len < cur_node.prefix.len() {
+                return false;
+            }
+        }
         unreachable!()
     }
 }
