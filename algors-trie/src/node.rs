@@ -56,9 +56,6 @@ impl Node {
 
     /// Returns the index of the child, if exists, given the child's expected
     /// first byte
-    /// This function ALWAYS assumes that the child exists to avoid duplicate
-    /// checks.
-    /// You must first check that the child exists or set it in the bitmap.
     #[inline]
     pub fn child_idx_from_pos(&self, pos: ChildPos) -> usize {
         let bitmap = self.bitmap;
@@ -67,8 +64,8 @@ impl Node {
 
         // avoids branching.
         // on ARM this relies on NEON (CNT) which is mandatory for aarch64.
-        // on x86 this relies on SSE(4.2) (POPCOUNT` in the SSE 4.2 and is present
-        // since x86-64-v2.
+        // on x86 this relies on SSE 4.2 (POPCOUNT) and is present since
+        // x86-64-v2.
         let before = (safe_idx > 0) as u32 * bitmap[0].count_ones()
             + (safe_idx > 1) as u32 * bitmap[1].count_ones()
             + (safe_idx > 2) as u32 * bitmap[2].count_ones();
@@ -80,7 +77,8 @@ impl Node {
     }
 
     /// Returns a reference to the child.
-    /// Can only be called if the caller is certain the child exists.
+    /// Can only be called if the caller knows the child exists, otherwise
+    /// the wrong child might be returned.
     pub fn get_child(&self, pos: ChildPos) -> Option<&Node> {
         let idx = self.child_idx_from_pos(pos);
         let len = self.len_children();
@@ -88,7 +86,8 @@ impl Node {
     }
 
     /// Returns a mutable reference to the child.
-    /// Can only be called if the caller knows the child exists.
+    /// Can only be called if the caller knows the child exists, otherwise
+    /// the wrong child might be returned.
     pub fn get_mut_child(&mut self, pos: ChildPos) -> Option<&mut Node> {
         let idx = self.child_idx_from_pos(pos);
         let len = self.len_children();
@@ -98,10 +97,10 @@ impl Node {
     /// Stores the given node as a child to this node.
     #[inline]
     pub fn insert_child(&mut self, pos: ChildPos, child: Node) {
-        self.bitmap[pos.idx] |= 1 << pos.bit;
         let idx = self.child_idx_from_pos(pos);
         let len = self.len_children();
         self.children.insert(idx, child, len);
+        self.bitmap[pos.idx] |= 1 << pos.bit;
     }
 
     // Gives its children state to another node.
