@@ -23,7 +23,7 @@ pub struct BoundedRawVec<T> {
 }
 
 impl<T> BoundedRawVec<T> {
-    #[inline(always)]
+    #[inline]
     pub fn new() -> Self {
         let ptr_val = if Self::is_zst() {
             ptr::dangling_mut()
@@ -158,6 +158,22 @@ impl<T> BoundedRawVec<T> {
             ptr::write(ptr.add(i), element);
         }
     }
+
+    /// Removes an element from the container and returns it, if it exists.
+    pub fn remove(&mut self, i: usize, len: usize) -> Option<T> {
+        if self.tagged.is_null() || i >= len {
+            return None;
+        }
+
+        unsafe {
+            let p = self.as_mut_ptr();
+            let val = p.add(i).read();
+
+            ptr::copy(p.add(i + 1), p.add(i), len - i - 1);
+            Some(val)
+        }
+    }
+
     pub fn deallocate(&mut self, len: usize) {
         // ZST never go through an allocator.
         // We just need to drop

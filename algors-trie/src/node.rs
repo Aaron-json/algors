@@ -2,10 +2,12 @@ use crate::prefix::Prefix;
 use crate::util;
 use core::mem;
 
-pub struct Node {
+/// Node represents a single Radix Tree node.
+pub struct Node<T> {
     pub prefix: Prefix,
     bitmap: [u64; 4],
-    children: util::BoundedRawVec<Node>,
+    children: util::BoundedRawVec<Node<T>>,
+    pub val: Option<T>,
 }
 
 // The location of the bit representing a child.
@@ -15,13 +17,14 @@ pub struct ChildPos {
     bit: u8,
 }
 
-impl Node {
+impl<T> Node<T> {
     #[inline(always)]
-    pub fn new(prefix: &[u8]) -> Node {
+    pub fn new(prefix: &[u8]) -> Node<T> {
         Node {
             prefix: Prefix::new(prefix),
             bitmap: [0; 4],
             children: util::BoundedRawVec::new(),
+            val: None,
         }
     }
 
@@ -79,7 +82,8 @@ impl Node {
     /// Returns a reference to the child.
     /// Can only be called if the caller knows the child exists, otherwise
     /// the wrong child might be returned.
-    pub fn get_child(&self, pos: ChildPos) -> Option<&Node> {
+    #[inline]
+    pub fn get_child(&self, pos: ChildPos) -> Option<&Node<T>> {
         let idx = self.child_idx_from_pos(pos);
         let len = self.len_children();
         self.children.get(idx, len)
@@ -88,7 +92,8 @@ impl Node {
     /// Returns a mutable reference to the child.
     /// Can only be called if the caller knows the child exists, otherwise
     /// the wrong child might be returned.
-    pub fn get_mut_child(&mut self, pos: ChildPos) -> Option<&mut Node> {
+    #[inline]
+    pub fn get_mut_child(&mut self, pos: ChildPos) -> Option<&mut Node<T>> {
         let idx = self.child_idx_from_pos(pos);
         let len = self.len_children();
         self.children.get_mut(idx, len)
@@ -96,24 +101,34 @@ impl Node {
 
     /// Stores the given node as a child to this node.
     #[inline]
-    pub fn insert_child(&mut self, pos: ChildPos, child: Node) {
+    pub fn insert_child(&mut self, pos: ChildPos, child: Node<T>) {
         let idx = self.child_idx_from_pos(pos);
         let len = self.len_children();
         self.children.insert(idx, child, len);
         self.bitmap[pos.idx] |= 1 << pos.bit;
     }
 
+    /// Removes the children at the given position, and returns the it.
+    #[inline]
+    pub fn remove_child(&mut self, pos: ChildPos) -> Option<Node<T>> {
+        let idx = self.child_idx_from_pos(pos);
+        let len = self.len_children();
+        let res = self.children.remove(idx, len);
+        self.bitmap[pos.idx] &= !(1 << pos.bit);
+        res
+    }
+
     // Gives its children state to another node.
     // useful when splitting nodes
     #[inline]
-    pub fn transfer_children(&mut self, other: &mut Node) {
+    pub fn transfer_children(&mut self, other: &mut Node<T>) {
         other.children = mem::take(&mut self.children);
         other.bitmap = self.bitmap;
         self.bitmap = [0u64; 4];
     }
 }
 
-impl Drop for Node {
+impl<T> Drop for Node<T> {
     fn drop(&mut self) {
         let child_len = self.len_children();
         self.children.deallocate(child_len);

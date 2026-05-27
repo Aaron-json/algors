@@ -85,6 +85,62 @@ impl Prefix {
         res
     }
 
+    /// Allows creating a single Prefix from multiple efficiently.
+    pub fn from_slices(slices: &[&[u8]]) -> Self {
+        let total_len: usize = slices.iter().map(|s| s.len()).sum();
+        let mut res = Self {
+            _align: [],
+            bytes: [0u8; PREFIX_SIZE],
+        };
+
+        if total_len <= INLINE_CAP {
+            res.bytes[TAG_LEN_BYTE] = ((total_len << 1) as u8) | 0x1;
+            let mut i = 0;
+            for slice in slices.iter() {
+                // we are certain the memory is not overlapping since we
+                // are creating a new immutable object
+                let slice_len = slice.len();
+                unsafe {
+                    res.bytes
+                        .as_mut_ptr()
+                        .add(INLINE_DATA_OFFSET)
+                        .add(i)
+                        .copy_from(slice.as_ptr(), slice_len);
+                }
+                i += slice_len;
+            }
+        } else {
+            unsafe {
+                // Aligning by 2 bytes lets us use the last bit as the tag.
+                let layout = alloc::Layout::from_size_align(total_len, 2)
+                    .expect("Prefix layout could not be created");
+
+                let pt = alloc::alloc(layout);
+                if pt.is_null() {
+                    alloc::handle_alloc_error(layout);
+                }
+
+                let mut i = 0;
+                for slice in slices.iter() {
+                    // we are certain the memory is not overlapping since we
+                    // are creating a new immutable object
+                    let slice_len = slice.len();
+                    pt.add(i).copy_from(slice.as_ptr(), slice_len);
+                    i += slice_len;
+                }
+                ptr::write_unaligned(
+                    res.bytes.as_mut_ptr().add(ALLOC_LEN_OFFSET) as *mut usize,
+                    total_len,
+                );
+                ptr::write_unaligned(
+                    res.bytes.as_mut_ptr().add(POINTER_OFFSET) as *mut *mut u8,
+                    pt,
+                );
+            }
+        }
+        res
+    }
+
     #[inline(always)]
     pub fn is_inline(&self) -> bool {
         (self.bytes[TAG_LEN_BYTE] & 0x1) == 1
