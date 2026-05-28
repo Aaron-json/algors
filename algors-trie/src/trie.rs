@@ -1,4 +1,4 @@
-use crate::node::Node;
+use crate::node::{ChildPos, Node};
 use crate::prefix::Prefix;
 use crate::util;
 
@@ -62,6 +62,37 @@ impl<T> TrieMap<T> {
                 new_child.val = Some(val);
                 cur_node.insert_child(child_pos, new_child);
                 return;
+            }
+        }
+    }
+
+    pub fn remove<R>(&mut self, key: R) -> Option<T>
+    where
+        R: AsRef<[u8]>,
+    {
+        let key_ref = key.as_ref();
+        if key_ref.is_empty() || self.root.is_none() {
+            return None;
+        }
+
+        let mut cur_node = self.root.as_mut().unwrap();
+        let mut cur_data = key_ref;
+        loop {
+            let lcp_len = util::lcp(cur_node.prefix.as_ref(), cur_data);
+            if lcp_len < cur_node.prefix.len() {
+                return None;
+            }
+            if lcp_len == cur_data.len() {
+                // TODO: we now have to compress the tree
+                // in case this was the last node
+                return cur_node.val.take();
+            }
+            cur_data = &cur_data[lcp_len..];
+            let next_pos = Node::<T>::child_pos(cur_data[0]);
+            if cur_node.child_exists(next_pos) {
+                cur_node = cur_node.get_mut_child(next_pos).unwrap();
+            } else {
+                return None;
             }
         }
     }
@@ -134,5 +165,4 @@ impl<T> TrieMap<T> {
     {
         self.get(key).is_some()
     }
-
 }
