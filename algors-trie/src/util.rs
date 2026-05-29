@@ -204,6 +204,21 @@ impl<T> BoundedRawVec<T> {
         }
         self.tagged = ptr::null_mut();
     }
+
+    pub fn iter(&self, len: usize) -> Iter<T> {
+        Iter {
+            ptr: self.as_mut_ptr(),
+            len,
+            _marker: PhantomData,
+        }
+    }
+    pub fn iter_mut(&mut self, len: usize) -> IterMut<T> {
+        IterMut {
+            ptr: self.as_mut_ptr(),
+            len,
+            _marker: PhantomData,
+        }
+    }
 }
 
 /// Immutable iterator over BoundedRawVec.
