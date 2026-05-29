@@ -1,4 +1,6 @@
 use alloc::alloc;
+use core::iter::FusedIterator;
+use core::marker::PhantomData;
 use core::{mem, ptr};
 
 const TAG_MASK: u8 = 0b111;
@@ -203,6 +205,130 @@ impl<T> BoundedRawVec<T> {
         self.tagged = ptr::null_mut();
     }
 }
+
+/// Immutable iterator over BoundedRawVec.
+pub struct Iter<'a, T> {
+    ptr: *const T,
+    len: usize,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            None
+        } else {
+            let res = unsafe { &*self.ptr };
+            // ZSTs will return the same pointer for all elements
+            // naturally
+            self.ptr = unsafe { self.ptr.add(1) };
+            self.len -= 1;
+            Some(res)
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+
+    #[inline]
+    fn count(self) -> usize {
+        self.len
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            None
+        } else {
+            self.len -= 1;
+            unsafe {
+                let p = if mem::size_of::<T>() == 0 {
+                    self.ptr
+                } else {
+                    self.ptr.add(self.len)
+                };
+                Some(&*p)
+            }
+        }
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Iter<'a, T> {}
+impl<'a, T> FusedIterator for Iter<'a, T> {}
+
+impl<'a, T> Clone for Iter<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            ptr: self.ptr,
+            len: self.len,
+            _marker: PhantomData,
+        }
+    }
+}
+
+/// Mutable iterator over BoundedRawVec.
+pub struct IterMut<'a, T> {
+    ptr: *mut T,
+    len: usize,
+    _marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T> Iterator for IterMut<'a, T> {
+    type Item = &'a mut T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            None
+        } else {
+            let res = unsafe { &mut *self.ptr };
+            if mem::size_of::<T>() != 0 {
+                self.ptr = unsafe { self.ptr.add(1) };
+            }
+            self.len -= 1;
+            Some(res)
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+
+    #[inline]
+    fn count(self) -> usize {
+        self.len
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            None
+        } else {
+            self.len -= 1;
+            unsafe {
+                let p = if mem::size_of::<T>() == 0 {
+                    self.ptr
+                } else {
+                    self.ptr.add(self.len)
+                };
+                Some(&mut *p)
+            }
+        }
+    }
+}
+
+impl<'a, T> ExactSizeIterator for IterMut<'a, T> {}
+impl<'a, T> FusedIterator for IterMut<'a, T> {}
 
 impl<T> Default for BoundedRawVec<T> {
     fn default() -> Self {
