@@ -3,3 +3,5 @@ mod prefix;
 mod trie;
 mod util;
 mod node;
+
+pub use trie::TrieMap;

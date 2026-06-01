@@ -105,7 +105,7 @@ impl Prefix {
                         .as_mut_ptr()
                         .add(INLINE_DATA_OFFSET)
                         .add(i)
-                        .copy_from(slice.as_ptr(), slice_len);
+                        .copy_from_nonoverlapping(slice.as_ptr(), slice_len);
                 }
                 i += slice_len;
             }
@@ -125,7 +125,8 @@ impl Prefix {
                     // we are certain the memory is not overlapping since we
                     // are creating a new immutable object
                     let slice_len = slice.len();
-                    pt.add(i).copy_from(slice.as_ptr(), slice_len);
+                    pt.add(i)
+                        .copy_from_nonoverlapping(slice.as_ptr(), slice_len);
                     i += slice_len;
                 }
                 ptr::write_unaligned(

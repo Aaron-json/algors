@@ -21,18 +21,19 @@ const CAPACITY_MAX: usize = 256;
 /// implement Drop. Callers must call `deallocate` in their Drop
 /// implementations.
 pub struct BoundedRawVec<T> {
-    tagged: *mut T,
+    tagged: usize,
+    _marker: PhantomData<T>,
 }
 
 impl<T> BoundedRawVec<T> {
     #[inline]
     pub fn new() -> Self {
         let ptr_val = if Self::is_zst() {
-            ptr::dangling_mut()
+            ptr::dangling_mut::<T>() as usize
         } else {
-            ptr::null_mut()
+            0
         };
-        Self { tagged: ptr_val }
+        Self { tagged: ptr_val, _marker: PhantomData }
     }
 
     /// Checks whether the type stored is a Zero Sized Type.
@@ -46,7 +47,7 @@ impl<T> BoundedRawVec<T> {
     /// same value although they might mean different things.
     #[inline(always)]
     fn cap_tag(&self) -> u8 {
-        ((self.tagged as usize) & (TAG_MASK as usize)) as u8
+        (self.tagged & (TAG_MASK as usize)) as u8
     }
 
     #[inline(always)]
@@ -54,7 +55,7 @@ impl<T> BoundedRawVec<T> {
         if Self::is_zst() {
             return CAPACITY_MAX;
         }
-        if self.tagged.is_null() {
+        if self.tagged == 0 {
             0
         } else {
             1 << (self.cap_tag() + 1)
@@ -75,23 +76,24 @@ impl<T> BoundedRawVec<T> {
             // ZST dangling pointers do not go through the allocator and
             // so we don't have control over their alignment
             // We handle them as a special case.
-            return self.tagged;
+            return self.tagged as *mut T;
         }
-        ((self.tagged as usize) & (!TAG_MASK as usize)) as *mut T
+        (self.tagged & !(TAG_MASK as usize)) as *mut T
     }
 
     #[inline(always)]
     pub fn get(&self, i: usize, len: usize) -> Option<&T> {
-        if self.tagged.is_null() || i >= len {
+        if self.tagged == 0 || i >= len {
             None
         } else {
-            unsafe { Some(&*self.as_mut_ptr().add(i)) }
+            let ptr = self.as_mut_ptr();
+            unsafe { Some(&*ptr.add(i)) }
         }
     }
 
     #[inline(always)]
     pub fn get_mut(&mut self, i: usize, len: usize) -> Option<&mut T> {
-        if self.tagged.is_null() || i >= len {
+        if self.tagged == 0 || i >= len {
             None
         } else {
             unsafe { Some(&mut *self.as_mut_ptr().add(i)) }
@@ -149,7 +151,7 @@ impl<T> BoundedRawVec<T> {
                 }
 
                 ptr = new_ptr;
-                self.tagged = ((ptr as usize) | new_tag as usize) as *mut T;
+                self.tagged = (ptr as usize) | new_tag as usize;
             }
         } else {
             unsafe {
@@ -163,7 +165,7 @@ impl<T> BoundedRawVec<T> {
 
     /// Removes an element from the container and returns it, if it exists.
     pub fn remove(&mut self, i: usize, len: usize) -> Option<T> {
-        if self.tagged.is_null() || i >= len {
+        if self.tagged == 0 || i >= len {
             return None;
         }
 
@@ -202,7 +204,7 @@ impl<T> BoundedRawVec<T> {
             let layout = alloc::Layout::from_size_align(size, align).unwrap();
             alloc::dealloc(ptr as *mut u8, layout);
         }
-        self.tagged = ptr::null_mut();
+        self.tagged = 0;
     }
 
     pub fn iter(&self, len: usize) -> Iter<T> {

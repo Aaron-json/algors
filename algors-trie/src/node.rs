@@ -1,5 +1,5 @@
 use crate::prefix::Prefix;
-use crate::util;
+use crate::util::{self, Iter, IterMut};
 use core::mem;
 
 /// Node represents a single Radix Tree node.
@@ -45,7 +45,7 @@ impl<T> Node<T> {
 
     /// Given a byte, it returns its position among the children
     #[inline(always)]
-    pub fn child_pos(byte: u8) -> ChildPos {
+    pub fn child_pos_from_byte(byte: u8) -> ChildPos {
         // divide by 64 to get the elememt index
         let idx = byte >> 6;
         // modulo to get the bit
@@ -55,6 +55,19 @@ impl<T> Node<T> {
             idx: idx as usize,
             bit,
         }
+    }
+
+    /// Given a child index, it returns its position in the bitmap.
+    /// # Panic
+    /// Panics if the index is out of bounds.
+    #[inline]
+    pub fn child_pos_from_idx(&self, idx: usize) -> ChildPos {
+        // NOTE: This is a hacky/easy wat to do this. It does a memory
+        // read to get the first which could cause a chache miss. Most of the
+        // time the prefix should be inlined and the value in cache.
+        let len = self.len_children();
+        let child = self.children.get(idx, len).expect("Index out of bounds");
+        Self::child_pos_from_byte(child.prefix.as_ref()[0])
     }
 
     /// Returns the index of the child, if exists, given the child's expected
@@ -80,21 +93,37 @@ impl<T> Node<T> {
     }
 
     /// Returns a reference to the child.
-    /// Can only be called if the caller knows the child exists, otherwise
-    /// the wrong child might be returned.
+    /// The given posision must be for an existing child, otherwise the
+    /// wrong child might be returned.
     #[inline]
-    pub fn get_child(&self, pos: ChildPos) -> Option<&Node<T>> {
+    pub fn get_child_by_pos(&self, pos: ChildPos) -> Option<&Node<T>> {
         let idx = self.child_idx_from_pos(pos);
+        self.get_child_by_idx(idx)
+    }
+
+    /// Returns a mutable reference to the child.
+    /// The given posision must be for an existing child, otherwise the
+    /// wrong child might be returned.
+    #[inline]
+    pub fn get_mut_child_by_pos(&mut self, pos: ChildPos) -> Option<&mut Node<T>> {
+        let idx = self.child_idx_from_pos(pos);
+        self.get_mut_child_by_idx(idx)
+    }
+
+    /// Returns the child at the given index.
+    /// # Panic
+    /// Panics if the index is out of bounds.
+    #[inline]
+    pub fn get_child_by_idx(&self, idx: usize) -> Option<&Node<T>> {
         let len = self.len_children();
         self.children.get(idx, len)
     }
 
     /// Returns a mutable reference to the child.
-    /// Can only be called if the caller knows the child exists, otherwise
-    /// the wrong child might be returned.
+    /// # Panic
+    /// Panics if the index is out of bounds.
     #[inline]
-    pub fn get_mut_child(&mut self, pos: ChildPos) -> Option<&mut Node<T>> {
-        let idx = self.child_idx_from_pos(pos);
+    pub fn get_mut_child_by_idx(&mut self, idx: usize) -> Option<&mut Node<T>> {
         let len = self.len_children();
         self.children.get_mut(idx, len)
     }
@@ -118,13 +147,21 @@ impl<T> Node<T> {
         res
     }
 
-    // Gives its children state to another node.
-    // useful when splitting nodes
+    /// Gives its children state to another node.
+    /// useful when splitting nodes
     #[inline]
     pub fn transfer_children(&mut self, other: &mut Node<T>) {
         other.children = mem::take(&mut self.children);
         other.bitmap = self.bitmap;
         self.bitmap = [0u64; 4];
+    }
+
+    pub fn iter_children(&self) -> Iter<Node<T>> {
+        self.children.iter(self.len_children())
+    }
+
+    pub fn iter_mut_children(&mut self) -> IterMut<Node<T>> {
+        self.children.iter_mut(self.len_children())
     }
 }
 
