@@ -207,14 +207,14 @@ impl<T> BoundedRawVec<T> {
         self.tagged = 0;
     }
 
-    pub fn iter(&self, len: usize) -> Iter<T> {
+    pub fn iter(&self, len: usize) -> Iter<'_, T> {
         Iter {
             ptr: self.as_mut_ptr(),
             len,
             _marker: PhantomData,
         }
     }
-    pub fn iter_mut(&mut self, len: usize) -> IterMut<T> {
+    pub fn iter_mut(&mut self, len: usize) -> IterMut<'_, T> {
         IterMut {
             ptr: self.as_mut_ptr(),
             len,
@@ -228,6 +228,16 @@ pub struct Iter<'a, T> {
     ptr: *const T,
     len: usize,
     _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> Iter<'a, T> {
+    pub fn new_empty() -> Self {
+        Self {
+            ptr: ptr::null(),
+            len: 0,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
@@ -295,6 +305,16 @@ pub struct IterMut<'a, T> {
     ptr: *mut T,
     len: usize,
     _marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T> IterMut<'a, T> {
+    pub fn new_empty() -> Self {
+        Self {
+            ptr: ptr::null_mut(),
+            len: 0,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<'a, T> Iterator for IterMut<'a, T> {
