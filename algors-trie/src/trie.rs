@@ -22,7 +22,7 @@ impl<T> TrieMap<T> {
 
         if self.root.is_none() {
             let mut new_node = Node::new(data_ref);
-            *new_node.val_mut() = Some(val);
+            new_node.val = Some(val);
             self.root = Some(new_node);
             return;
         }
@@ -30,18 +30,18 @@ impl<T> TrieMap<T> {
         let mut cur_data = data_ref;
         let mut cur_node = self.root.as_mut().unwrap();
         loop {
-            let lcp_len = util::lcp(cur_node.prefix().as_ref(), cur_data);
-            if lcp_len < cur_node.prefix().len() {
+            let lcp_len = util::lcp(cur_node.prefix.as_ref(), cur_data);
+            if lcp_len < cur_node.prefix.len() {
                 // create new split node to become the child of the
                 // current node that inherits its children.
-                let mut split_node = Node::new(&cur_node.prefix().as_ref()[lcp_len..]);
-                *split_node.val_mut() = cur_node.val_mut().take();
-                let new_prefix = Prefix::new(&cur_node.prefix().as_ref()[..lcp_len]);
-                *cur_node.prefix_mut() = new_prefix;
+                let mut split_node = Node::new(&cur_node.prefix.as_ref()[lcp_len..]);
+                split_node.val = cur_node.val.take();
+                let new_prefix = Prefix::new(&cur_node.prefix.as_ref()[..lcp_len]);
+                cur_node.prefix = new_prefix;
                 cur_node.transfer_children(&mut split_node);
 
                 // update the parent
-                let split_node_byte = split_node.prefix().as_ref()[0];
+                let split_node_byte = split_node.prefix.as_ref()[0];
 
                 // we just split the node so it has no children
                 cur_node.insert_child(Node::<T>::child_pos_from_byte(split_node_byte), split_node);
@@ -49,7 +49,7 @@ impl<T> TrieMap<T> {
 
             if lcp_len == cur_data.len() {
                 // already exists. overwrite the value
-                *cur_node.val_mut() = Some(val);
+                cur_node.val = Some(val);
                 return;
             }
 
@@ -61,7 +61,7 @@ impl<T> TrieMap<T> {
             } else {
                 // no child exists with this byte prefix
                 let mut new_child = Node::new(cur_data);
-                *new_child.val_mut() = Some(val);
+                new_child.val = Some(val);
                 cur_node.insert_child(child_pos, new_child);
                 return;
             }
@@ -81,12 +81,12 @@ impl<T> TrieMap<T> {
         let mut cur_data = key_ref;
         let mut visited: Vec<(*mut Node<T>, ChildPos)> = vec![];
         let res: Option<T> = loop {
-            let lcp_len = util::lcp(cur_node.prefix().as_ref(), cur_data);
-            if lcp_len < cur_node.prefix().len() {
+            let lcp_len = util::lcp(cur_node.prefix.as_ref(), cur_data);
+            if lcp_len < cur_node.prefix.len() {
                 return None;
             }
             if lcp_len == cur_data.len() {
-                break cur_node.val_mut().take();
+                break cur_node.val.take();
             }
             cur_data = &cur_data[lcp_len..];
             let next_pos = Node::<T>::child_pos_from_byte(cur_data[0]);
@@ -115,23 +115,23 @@ impl<T> TrieMap<T> {
             child_pos = cur.1;
             // SAFETY: child must exist since this position was traversed.
             let visited_child = parent.get_child_by_pos(child_pos).unwrap();
-            if visited_child.len_children() == 0 && visited_child.val().is_none() {
+            if visited_child.len_children() == 0 && visited_child.val.is_none() {
                 parent.remove_child(child_pos);
             }
             // a node can only be compressed if it has a single child
             // and no value.
-            if parent.len_children() == 1 && parent.val().is_none() {
+            if parent.len_children() == 1 && parent.val.is_none() {
                 // SAFETY: we checked that the child exists above.
                 let mut child = parent.remove_child(parent.child_pos_from_idx(0)).unwrap();
-                *parent.prefix_mut() =
-                    Prefix::from_slices(&[parent.prefix().as_ref(), child.prefix().as_ref()]);
+                parent.prefix =
+                    Prefix::from_slices(&[parent.prefix.as_ref(), child.prefix.as_ref()]);
                 child.transfer_children(parent);
-                *parent.val_mut() = child.val_mut().take();
+                parent.val = child.val.take();
             }
         }
         // root node has to be compressed manually since it has no parent.
         if let Some(root) = self.root.as_mut()
-            && root.val().is_none()
+            && root.val.is_none()
         {
             let count = root.len_children();
             if count == 0 {
@@ -139,7 +139,7 @@ impl<T> TrieMap<T> {
             } else if count == 1 {
                 // make the child the new root
                 let mut child = root.remove_child(root.child_pos_from_idx(0)).unwrap();
-                *child.prefix_mut() = Prefix::from_slices(&[root.prefix().as_ref(), child.prefix().as_ref()]);
+                child.prefix = Prefix::from_slices(&[root.prefix.as_ref(), child.prefix.as_ref()]);
                 self.root = Some(child);
             }
         }
@@ -159,12 +159,12 @@ impl<T> TrieMap<T> {
         let mut cur_node = self.root.as_ref().unwrap();
         let mut cur_data = key_ref;
         loop {
-            let lcp_len = util::lcp(cur_node.prefix().as_ref(), cur_data);
-            if lcp_len < cur_node.prefix().len() {
+            let lcp_len = util::lcp(cur_node.prefix.as_ref(), cur_data);
+            if lcp_len < cur_node.prefix.len() {
                 return None;
             }
             if lcp_len == cur_data.len() {
-                return cur_node.val().as_ref();
+                return cur_node.val.as_ref();
             }
             // keep traversing down.
             cur_data = &cur_data[lcp_len..];
@@ -190,12 +190,12 @@ impl<T> TrieMap<T> {
         let mut cur_node = self.root.as_mut().unwrap();
         let mut cur_data = key_ref;
         loop {
-            let lcp_len = util::lcp(cur_node.prefix().as_ref(), cur_data);
-            if lcp_len < cur_node.prefix().len() {
+            let lcp_len = util::lcp(cur_node.prefix.as_ref(), cur_data);
+            if lcp_len < cur_node.prefix.len() {
                 return None;
             }
             if lcp_len == cur_data.len() {
-                return cur_node.val_mut().as_mut();
+                return cur_node.val.as_mut();
             }
             // keep traversing down.
             cur_data = &cur_data[lcp_len..];
