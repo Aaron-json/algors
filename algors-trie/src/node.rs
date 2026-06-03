@@ -5,6 +5,8 @@ use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::ptr;
 
+const NODE_ALLOC_ALIGN: usize = 4;
+
 /// Common fields at the start of every node to allow branchless access,
 /// which avoids a performance regression that comes up when every field
 /// access (especially the prefix) requires an if check (branch).
@@ -79,7 +81,9 @@ impl<T> Node<T> {
             },
         };
         // We need 4-byte alignment to use 2 bits for tagging.
-        let layout = Layout::new::<LeafNode<T>>().align_to(4).unwrap();
+        let layout = Layout::new::<LeafNode<T>>()
+            .align_to(NODE_ALLOC_ALIGN)
+            .unwrap();
         unsafe {
             let ptr = alloc(layout) as *mut LeafNode<T>;
             if ptr.is_null() {
@@ -111,7 +115,9 @@ impl<T> Node<T> {
             bitmap: [0; 4],
             children: util::BoundedRawVec::new(),
         };
-        let layout = Layout::new::<InternalNode<T>>().align_to(4).unwrap();
+        let layout = Layout::new::<InternalNode<T>>()
+            .align_to(NODE_ALLOC_ALIGN)
+            .unwrap();
         unsafe {
             let ptr = alloc(layout) as *mut InternalNode<T>;
             if ptr.is_null() {
@@ -359,11 +365,15 @@ impl<T> Node<T> {
         };
 
         // deallocate old node
-        let layout = Layout::new::<LeafNode<T>>().align_to(4).unwrap();
+        let layout = Layout::new::<LeafNode<T>>()
+            .align_to(NODE_ALLOC_ALIGN)
+            .unwrap();
         unsafe {
             dealloc(leaf_ptr as *mut u8, layout);
 
-            let layout_int = Layout::new::<InternalNode<T>>().align_to(4).unwrap();
+            let layout_int = Layout::new::<InternalNode<T>>()
+                .align_to(NODE_ALLOC_ALIGN)
+                .unwrap();
             let ptr = alloc(layout_int) as *mut InternalNode<T>;
             if ptr.is_null() {
                 alloc::alloc::handle_alloc_error(layout_int);
@@ -427,7 +437,9 @@ impl<T> Drop for Node<T> {
             ptr::drop_in_place(&mut (*header_ptr).prefix);
 
             if self.is_leaf() {
-                let layout = Layout::new::<LeafNode<T>>().align_to(4).unwrap();
+                let layout = Layout::new::<LeafNode<T>>()
+                    .align_to(NODE_ALLOC_ALIGN)
+                    .unwrap();
                 dealloc(header_ptr as *mut u8, layout);
             } else {
                 let internal = self.as_internal_ptr();
@@ -439,7 +451,9 @@ impl<T> Drop for Node<T> {
                 // drop the type since it might have other data
                 // that needs to drop or an implementations of Drop
                 ptr::drop_in_place(&mut (*internal).children);
-                let layout = Layout::new::<InternalNode<T>>().align_to(4).unwrap();
+                let layout = Layout::new::<InternalNode<T>>()
+                    .align_to(NODE_ALLOC_ALIGN)
+                    .unwrap();
                 dealloc(header_ptr as *mut u8, layout);
             }
         }

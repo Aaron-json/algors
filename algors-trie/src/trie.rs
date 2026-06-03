@@ -95,7 +95,7 @@ impl<T> TrieMap<T> {
 
         let mut cur_node = self.root.as_mut().unwrap();
         let mut cur_data = key_ref;
-        let mut visited: Vec<(*mut Node<T>, ChildPos)> = vec![];
+        let mut visited: Vec<(*mut Node<T>, ChildPos)> = Vec::with_capacity(8);
         let res: Option<T> = loop {
             let lcp_len = util::lcp(cur_node.prefix().as_ref(), cur_data);
             if lcp_len < cur_node.prefix().len() {
@@ -145,6 +145,10 @@ impl<T> TrieMap<T> {
                 if let Some(v) = child.take_val() {
                     parent.set_val(v);
                 }
+            } else {
+                // if the parent has multiple children or has a value then
+                // no further compression is possible.
+                break;
             }
         }
         // root node has to be compressed manually since it has no parent.
