@@ -428,8 +428,14 @@ impl<T> Drop for Node<T> {
                 let layout = Layout::new::<LeafNode<T>>().align_to(4).unwrap();
                 dealloc(header_ptr as *mut u8, layout);
             } else {
-                let internal = header_ptr as *mut InternalNode<T>;
-                // Drop children vec
+                let internal = self.as_internal_ptr();
+                // children requires users to deallocate manually since
+                // it does not maintain length
+                let len = (*internal).len_children();
+                (*internal).children.deallocate(len);
+
+                // drop the type since it might have other data
+                // that needs to drop or an implementations of Drop
                 ptr::drop_in_place(&mut (*internal).children);
                 let layout = Layout::new::<InternalNode<T>>().align_to(4).unwrap();
                 dealloc(header_ptr as *mut u8, layout);
