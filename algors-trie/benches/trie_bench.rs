@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use algors_trie::TrieMap;
-use rand::{RngCore, SeedableRng};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rand::rngs::StdRng;
+use rand::{RngCore, SeedableRng};
 use std::collections::BTreeMap;
 
 fn bench_lookups(c: &mut Criterion) {
