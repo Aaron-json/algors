@@ -12,3 +12,7 @@ rand = "0.8"
 [[bench]]
 name = "trie_bench"
 harness = false
+
+[[bench]]
+name = "dictionary_bench"
+harness = false

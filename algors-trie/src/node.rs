@@ -2,28 +2,28 @@ use crate::prefix::Prefix;
 use crate::util::{self, Iter, IterMut};
 use alloc::alloc::{Layout, alloc, dealloc};
 use core::marker::PhantomData;
-use core::mem;
+use core::mem::{self, MaybeUninit};
 use core::ptr;
 
-// TODO: currently nodes use Option<T> for the value. this is fine but many
-// types like regular numbers and UUIDs don't have niches and will waste a
-// lot of space in padding.
-// A different approach is using MaybeUninit<T> and storing a flag for the
-// value in the pointer
-// Further, applications that use this as a set with a zero sized type will
-// truly allocate no space for the value. right now a ZST will cost us
-// a byte and some padding
-
-pub struct LeafNode<T> {
+/// Common fields at the start of every node to allow branchless access,
+/// which avoids a performance regression that comes up when every field
+/// access (especially the prefix) requires an if check (branch).
+#[repr(C)]
+struct Header<T> {
     prefix: Prefix,
-    val: Option<T>,
+    val: MaybeUninit<T>,
 }
 
+#[repr(C)]
+pub struct LeafNode<T> {
+    header: Header<T>,
+}
+
+#[repr(C)]
 pub struct InternalNode<T> {
-    prefix: Prefix,
+    header: Header<T>,
     bitmap: [u64; 4],
     children: util::BoundedRawVec<Node<T>>,
-    val: Option<T>,
 }
 
 impl<T> InternalNode<T> {
@@ -37,21 +37,19 @@ impl<T> InternalNode<T> {
     }
 }
 
-impl<T> Drop for InternalNode<T> {
-    fn drop(&mut self) {
-        let child_len = self.len_children();
-        self.children.deallocate(child_len);
-    }
-}
-
-/// Node represents a single Radix Tree node, implemented as a tagged pointer.
+/// Node represents a single Radix Tree node.
+///
+/// The pointer is tagged with 2 bits:
+/// Bit 0: Node Type (internal or leaf)
+/// Bit 1: Has Value
 pub struct Node<T> {
     ptr: usize,
     _marker: PhantomData<T>,
 }
 
 const LEAF_TAG: usize = 0x1;
-const TAG_MASK: usize = 0x1;
+const VAL_TAG: usize = 0x2;
+const TAG_MASK: usize = 0x3;
 
 // The location of the bit representing a child.
 #[derive(Clone, Copy)]
@@ -67,40 +65,63 @@ impl<T> Node<T> {
     }
 
     pub fn new_leaf(prefix: &[u8], val: Option<T>) -> Self {
+        let has_val = val.is_some();
         let node = LeafNode {
-            prefix: Prefix::new(prefix),
-            val,
+            header: Header {
+                prefix: Prefix::new(prefix),
+                val: if let Some(v) = val {
+                    MaybeUninit::new(v)
+                } else {
+                    MaybeUninit::uninit()
+                },
+            },
         };
-        let layout = Layout::new::<LeafNode<T>>().align_to(2).unwrap();
+        // We need 4-byte alignment to use 2 bits for tagging.
+        let layout = Layout::new::<LeafNode<T>>().align_to(4).unwrap();
         unsafe {
             let ptr = alloc(layout) as *mut LeafNode<T>;
             if ptr.is_null() {
                 alloc::alloc::handle_alloc_error(layout);
             }
             ptr::write(ptr, node);
+            let mut ptr_val = (ptr as usize) | LEAF_TAG;
+            if has_val {
+                ptr_val |= VAL_TAG;
+            }
             Self {
-                ptr: (ptr as usize) | LEAF_TAG,
+                ptr: ptr_val,
                 _marker: PhantomData,
             }
         }
     }
 
     pub fn new_internal(prefix: &[u8], val: Option<T>) -> Self {
+        let has_val = val.is_some();
         let node = InternalNode {
-            prefix: Prefix::new(prefix),
+            header: Header {
+                prefix: Prefix::new(prefix),
+                val: if let Some(v) = val {
+                    MaybeUninit::new(v)
+                } else {
+                    MaybeUninit::uninit()
+                },
+            },
             bitmap: [0; 4],
             children: util::BoundedRawVec::new(),
-            val,
         };
-        let layout = Layout::new::<InternalNode<T>>().align_to(2).unwrap();
+        let layout = Layout::new::<InternalNode<T>>().align_to(4).unwrap();
         unsafe {
             let ptr = alloc(layout) as *mut InternalNode<T>;
             if ptr.is_null() {
                 alloc::alloc::handle_alloc_error(layout);
             }
             ptr::write(ptr, node);
+            let mut ptr_val = ptr as usize;
+            if has_val {
+                ptr_val |= VAL_TAG;
+            }
             Self {
-                ptr: ptr as usize,
+                ptr: ptr_val,
                 _marker: PhantomData,
             }
         }
@@ -108,7 +129,17 @@ impl<T> Node<T> {
 
     #[inline(always)]
     pub fn is_leaf(&self) -> bool {
-        (self.ptr & TAG_MASK) == LEAF_TAG
+        (self.ptr & LEAF_TAG) != 0
+    }
+
+    #[inline(always)]
+    pub fn has_val(&self) -> bool {
+        (self.ptr & VAL_TAG) != 0
+    }
+
+    #[inline(always)]
+    fn as_header(&self) -> *mut Header<T> {
+        (self.ptr & !TAG_MASK) as *mut Header<T>
     }
 
     #[inline(always)]
@@ -123,47 +154,64 @@ impl<T> Node<T> {
 
     #[inline(always)]
     pub fn prefix(&self) -> &Prefix {
-        if self.is_leaf() {
-            unsafe { &(*self.as_leaf_ptr()).prefix }
-        } else {
-            unsafe { &(*self.as_internal_ptr()).prefix }
-        }
+        unsafe { &(*self.as_header()).prefix }
     }
 
     #[inline(always)]
     pub fn prefix_mut(&mut self) -> &mut Prefix {
-        if self.is_leaf() {
-            unsafe { &mut (*self.as_leaf_ptr()).prefix }
-        } else {
-            unsafe { &mut (*self.as_internal_ptr()).prefix }
-        }
+        unsafe { &mut (*self.as_header()).prefix }
     }
 
+    /// Access the value branchlessly if it exists.
     #[inline(always)]
-    pub fn val(&self) -> &Option<T> {
-        if self.is_leaf() {
-            unsafe { &(*self.as_leaf_ptr()).val }
-        } else {
-            unsafe { &(*self.as_internal_ptr()).val }
+    pub fn val(&self) -> Option<&T> {
+        if !self.has_val() {
+            return None;
         }
+        unsafe { Some((*self.as_header()).val.assume_init_ref()) }
     }
 
+    // Returns a mutable referene to the value
     #[inline(always)]
-    pub fn val_mut(&mut self) -> &mut Option<T> {
-        if self.is_leaf() {
-            unsafe { &mut (*self.as_leaf_ptr()).val }
-        } else {
-            unsafe { &mut (*self.as_internal_ptr()).val }
+    pub fn val_mut(&mut self) -> Option<&mut T> {
+        if !self.has_val() {
+            return None;
         }
+        unsafe { Some((*self.as_header()).val.assume_init_mut()) }
+    }
+
+    // Returns an owned value of T.
+    #[inline]
+    pub fn take_val(&mut self) -> Option<T> {
+        if !self.has_val() {
+            return None;
+        }
+        let val = unsafe { Some((*self.as_header()).val.as_ptr().read()) };
+        self.ptr &= !VAL_TAG;
+
+        val
+    }
+
+    // Sets the value for this node
+    pub fn set_val(&mut self, val: T) {
+        if self.has_val() {
+            // drop old value to avoid leaking it
+            unsafe { (*self.as_header()).val.assume_init_drop() }
+        }
+        unsafe {
+            (*self.as_header()).val.as_mut_ptr().write(val);
+        }
+        self.ptr |= VAL_TAG;
     }
 
     /// Returns the number of children the node has
     #[inline(always)]
     pub fn len_children(&self) -> usize {
         if self.is_leaf() {
-            return 0;
+            0
+        } else {
+            unsafe { (*self.as_internal_ptr()).len_children() }
         }
-        unsafe { (*self.as_internal_ptr()).len_children() }
     }
 
     #[inline(always)]
@@ -199,7 +247,7 @@ impl<T> Node<T> {
 
     /// Returns the index of the child, if exists, given the child's expected
     /// first byte
-    #[inline]
+    #[inline(always)]
     pub fn child_idx_from_pos(&self, pos: ChildPos) -> usize {
         if self.is_leaf() {
             return 0;
@@ -226,7 +274,7 @@ impl<T> Node<T> {
     /// Returns a reference to the child.
     /// The given posision must be for an existing child, otherwise the
     /// wrong child might be returned.
-    #[inline]
+    #[inline(always)]
     pub fn get_child_by_pos(&self, pos: ChildPos) -> Option<&Node<T>> {
         let idx = self.child_idx_from_pos(pos);
         self.get_child_by_idx(idx)
@@ -235,14 +283,14 @@ impl<T> Node<T> {
     /// Returns a mutable reference to the child.
     /// The given posision must be for an existing child, otherwise the
     /// wrong child might be returned.
-    #[inline]
+    #[inline(always)]
     pub fn get_mut_child_by_pos(&mut self, pos: ChildPos) -> Option<&mut Node<T>> {
         let idx = self.child_idx_from_pos(pos);
         self.get_mut_child_by_idx(idx)
     }
 
     /// Returns the child at the given index.
-    #[inline]
+    #[inline(always)]
     pub fn get_child_by_idx(&self, idx: usize) -> Option<&Node<T>> {
         if self.is_leaf() {
             return None;
@@ -298,28 +346,32 @@ impl<T> Node<T> {
         if !self.is_leaf() {
             return;
         }
+        let has_val = self.has_val();
         let leaf_ptr = self.as_leaf_ptr();
         let leaf = unsafe { ptr::read(leaf_ptr) };
 
         let internal = InternalNode {
-            prefix: leaf.prefix,
+            header: leaf.header,
             bitmap: [0; 4],
             children: util::BoundedRawVec::new(),
-            val: leaf.val,
         };
 
         // deallocate old node
-        let layout = Layout::new::<LeafNode<T>>().align_to(2).unwrap();
+        let layout = Layout::new::<LeafNode<T>>().align_to(4).unwrap();
         unsafe {
             dealloc(leaf_ptr as *mut u8, layout);
 
-            let layout_int = Layout::new::<InternalNode<T>>().align_to(2).unwrap();
+            let layout_int = Layout::new::<InternalNode<T>>().align_to(4).unwrap();
             let ptr = alloc(layout_int) as *mut InternalNode<T>;
             if ptr.is_null() {
                 alloc::alloc::handle_alloc_error(layout_int);
             }
             ptr::write(ptr, internal);
-            self.ptr = ptr as usize;
+            let mut ptr_val = ptr as usize;
+            if has_val {
+                ptr_val |= VAL_TAG;
+            }
+            self.ptr = ptr_val;
         }
     }
 
@@ -363,19 +415,24 @@ impl<T> Node<T> {
 
 impl<T> Drop for Node<T> {
     fn drop(&mut self) {
-        if self.is_leaf() {
-            let ptr = self.as_leaf_ptr();
-            unsafe {
-                ptr::drop_in_place(ptr);
-                let layout = Layout::new::<LeafNode<T>>().align_to(2).unwrap();
-                dealloc(ptr as *mut u8, layout);
+        let has_val = self.has_val();
+        let header_ptr = self.as_header();
+        unsafe {
+            if has_val {
+                (*header_ptr).val.as_mut_ptr().drop_in_place();
             }
-        } else {
-            let ptr = self.as_internal_ptr();
-            unsafe {
-                ptr::drop_in_place(ptr);
-                let layout = Layout::new::<InternalNode<T>>().align_to(2).unwrap();
-                dealloc(ptr as *mut u8, layout);
+            // Drop prefix (works for both since it's in the header)
+            ptr::drop_in_place(&mut (*header_ptr).prefix);
+
+            if self.is_leaf() {
+                let layout = Layout::new::<LeafNode<T>>().align_to(4).unwrap();
+                dealloc(header_ptr as *mut u8, layout);
+            } else {
+                let internal = header_ptr as *mut InternalNode<T>;
+                // Drop children vec
+                ptr::drop_in_place(&mut (*internal).children);
+                let layout = Layout::new::<InternalNode<T>>().align_to(4).unwrap();
+                dealloc(header_ptr as *mut u8, layout);
             }
         }
     }

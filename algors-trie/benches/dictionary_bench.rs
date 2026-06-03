@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use algors_trie::TrieMap;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -7,10 +7,7 @@ use std::io::{BufRead, BufReader};
 fn load_dictionary() -> Vec<String> {
     let file = File::open("/usr/share/dict/words").expect("Could not open dictionary");
     let reader = BufReader::new(file);
-    reader.lines()
-        .map_while(Result::ok)
-        .take(50_000)
-        .collect()
+    reader.lines().map_while(Result::ok).take(50_000).collect()
 }
 
 fn bench_dict_lookups(c: &mut Criterion) {

@@ -93,14 +93,29 @@ fn test_miri_unsafe_integrity() {
 }
 
 #[test]
-fn test_zst() {
-    let mut trie = TrieMap::<()>::new();
-    trie.insert("a", ());
-    trie.insert("b", ());
-    assert!(trie.contains("a"));
-    assert!(trie.contains("b"));
-    trie.remove("a");
-    assert!(!trie.contains("a"));
+fn test_radix_set_logic() {
+    let mut set = TrieMap::<()>::new();
+    let keys = vec!["apple", "app", "application", "aptitude", "bat", "bath"];
+    
+    for key in &keys {
+        set.insert(key, ());
+    }
+
+    for key in &keys {
+        assert!(set.contains(key));
+    }
+
+    assert!(!set.contains("apples"));
+    assert!(!set.contains("ap"));
+
+    // Test removals
+    assert_eq!(set.remove("app"), Some(()));
+    assert!(!set.contains("app"));
+    assert!(set.contains("apple")); // Sister node remains
+    
+    assert_eq!(set.remove("bat"), Some(()));
+    assert!(!set.contains("bat"));
+    assert!(set.contains("bath")); // Internal node should have compressed
 }
 
 #[test]
