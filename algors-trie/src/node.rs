@@ -8,6 +8,8 @@ use core::ptr;
 /// Common fields at the start of every node to allow branchless access,
 /// which avoids a performance regression that comes up when every field
 /// access (especially the prefix) requires an if check (branch).
+///
+/// We use the C memory layout to prevent the compiler from reordering
 #[repr(C)]
 struct Header<T> {
     prefix: Prefix,
