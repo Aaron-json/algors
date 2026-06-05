@@ -33,7 +33,10 @@ impl<T> BoundedRawVec<T> {
         } else {
             0
         };
-        Self { tagged: ptr_val, _marker: PhantomData }
+        Self {
+            tagged: ptr_val,
+            _marker: PhantomData,
+        }
     }
 
     /// Checks whether the type stored is a Zero Sized Type.
@@ -396,16 +399,33 @@ pub fn lcp(buf1: &[u8], buf2: &[u8]) -> usize {
         };
     }
 
+    // LLVM is good at vectorizing this u128 loop so we get SIMD without
+    // actually writing SIMD code. It also means we don't have to target
+    // newer compiler versions which have more portable SIMD intrinsics.
+    if len >= 16 {
+        unsafe {
+            let mut i = 0usize;
+            while i + 16 <= len {
+                let x = p1.add(i).cast::<u128>().read_unaligned();
+                let y = p2.add(i).cast::<u128>().read_unaligned();
+                diff!(x, y, i);
+                i += 16;
+            }
+            let tail = len - 16;
+            let x = p1.add(tail).cast::<u128>().read_unaligned();
+            let y = p2.add(tail).cast::<u128>().read_unaligned();
+            diff!(x, y, tail);
+        }
+        return len;
+    }
+
     // We compare memory in chunks of 8, 4, 2 or 1 depending on the length
     if len >= 8 {
         unsafe {
-            let mut i = 0usize;
-            while i + 8 <= len {
-                let x = p1.add(i).cast::<u64>().read_unaligned();
-                let y = p2.add(i).cast::<u64>().read_unaligned();
-                diff!(x, y, i);
-                i += 8;
-            }
+            let x = p1.cast::<u64>().read_unaligned();
+            let y = p2.cast::<u64>().read_unaligned();
+            diff!(x, y, 0);
+
             let tail = len - 8;
             let x = p1.add(tail).cast::<u64>().read_unaligned();
             let y = p2.add(tail).cast::<u64>().read_unaligned();
@@ -413,6 +433,7 @@ pub fn lcp(buf1: &[u8], buf2: &[u8]) -> usize {
         }
         return len;
     }
+
     if len >= 4 {
         unsafe {
             let x = p1.cast::<u32>().read_unaligned();

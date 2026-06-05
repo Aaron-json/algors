@@ -201,6 +201,7 @@ impl<T> Node<T> {
     }
 
     // Sets the value for this node
+    #[inline]
     pub fn set_val(&mut self, val: T) {
         if self.has_val() {
             // drop old value to avoid leaking it
@@ -213,7 +214,7 @@ impl<T> Node<T> {
     }
 
     /// Returns the number of children the node has
-    #[inline(always)]
+    #[inline]
     pub fn len_children(&self) -> usize {
         if self.is_leaf() {
             0
@@ -222,7 +223,7 @@ impl<T> Node<T> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn child_exists(&self, pos: ChildPos) -> bool {
         if self.is_leaf() {
             return false;
@@ -234,12 +235,9 @@ impl<T> Node<T> {
     /// Given a byte, it returns its position among the children
     #[inline(always)]
     pub fn child_pos_from_byte(byte: u8) -> ChildPos {
-        let idx = byte >> 6;
-        let bit = byte & 63;
-
         ChildPos {
-            idx: idx as usize,
-            bit,
+            idx: (byte >> 6) as usize,
+            bit: byte & 63,
         }
     }
 
