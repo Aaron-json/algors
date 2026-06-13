@@ -170,6 +170,95 @@ impl<T> TrieMap<T> {
         res
     }
 
+    // Returns the node a prefix ends at and the offset inside that node's
+    // prefix where the searched prefix ends.
+    fn find_prefix_node<R>(&self, key: R) -> Option<(&Node<T>, usize)>
+    where
+        R: AsRef<[u8]>,
+    {
+        let key_ref = key.as_ref();
+        let mut cur_node = self.root.as_ref()?;
+        if key_ref.is_empty() {
+            return Some((cur_node, 0));
+        }
+
+        let mut cur_data = key_ref;
+        loop {
+            let lcp_len = util::lcp(cur_node.prefix().as_ref(), cur_data);
+            if lcp_len == cur_data.len() {
+                // prefix ends at this node. whole or in part
+                return Some((cur_node, lcp_len));
+            }
+            if lcp_len < cur_node.prefix().len() {
+                // mismatch before the whole prefix is consumed
+                return None;
+            }
+
+            // go down the tree
+            cur_data = &cur_data[lcp_len..];
+            let byte = cur_data[0];
+            let child_pos = Node::<T>::child_pos_from_byte(byte);
+            if cur_node.child_exists(child_pos) {
+                cur_node = cur_node.get_child_by_pos(child_pos).unwrap();
+            } else {
+                return None;
+            }
+        }
+    }
+
+    /// Runs the given operation once for every value with the given prefix.
+    pub fn for_each_prefix<'trie, R, F>(&'trie self, prefix: R, mut f: F)
+    where
+        R: AsRef<[u8]>,
+        F: FnMut(SuffixRef<'_, 'trie>, &'trie T),
+    {
+        let Some((node, offset)) = self.find_prefix_node(prefix) else {
+            return;
+        };
+
+        let mut chunks = Vec::new();
+        let mut current_len = 0;
+        let first = &node.prefix().as_ref()[offset..];
+        if !first.is_empty() {
+            chunks.push(first);
+            current_len += first.len();
+        }
+
+        Self::for_each_prefix_from_node(node, &mut chunks, current_len, &mut f);
+    }
+
+    /// Recursive helper for a DFS traversal of the trie.
+    fn for_each_prefix_from_node<'trie, F>(
+        node: &'trie Node<T>,
+        chunks: &mut Vec<&'trie [u8]>,
+        // keeping track of current_len during iteration helps the Suffix
+        // returned to the user to be able to cache the length and not
+        // compute it.
+        current_len: usize,
+        f: &mut F,
+    ) where
+        F: FnMut(SuffixRef<'_, 'trie>, &'trie T),
+    {
+        // TODO: provide iterative fallback for exceedingly deep traversals
+        // to avoid stack overflow bugs.
+        if let Some(value) = node.val() {
+            f(
+                SuffixRef {
+                    chunks: chunks.as_slice(),
+                    len: current_len,
+                },
+                value,
+            );
+        }
+
+        for child in node.iter_children() {
+            let prefix = child.prefix().as_ref();
+            chunks.push(prefix);
+            Self::for_each_prefix_from_node(child, chunks, current_len + prefix.len(), f);
+            chunks.pop();
+        }
+    }
+
     pub fn get<R>(&self, key: R) -> Option<&T>
     where
         R: AsRef<[u8]>,
@@ -237,5 +326,38 @@ impl<T> TrieMap<T> {
         R: AsRef<[u8]>,
     {
         self.get(key).is_some()
+    }
+}
+
+/// A non-owning list of prefixes that make up a suffix.
+///
+/// # Iterator
+/// Implements an iterator over the disjoint byte arrays
+pub struct SuffixRef<'buf, 'trie> {
+    chunks: &'buf [&'trie [u8]],
+    len: usize,
+}
+
+impl<'buf, 'trie> SuffixRef<'buf, 'trie> {
+    /// Returns an iterator over the chunks that make up the suffix.
+    pub fn chunks(&self) -> impl Iterator<Item = &'trie [u8]> {
+        self.chunks.iter().copied()
+    }
+
+    /// Returns the total number across all chunks.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.len);
+        for chunk in self.chunks {
+            out.extend_from_slice(chunk);
+        }
+        out
     }
 }
