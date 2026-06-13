@@ -1,7 +1,7 @@
 extern crate alloc;
+mod node;
 mod prefix;
 mod trie;
 mod util;
-mod node;
 
 pub use trie::TrieMap;
