@@ -1,69 +1,32 @@
-use algors_trie::TrieMap;
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+mod common;
+
+use common::{bench_inserts, bench_lookups};
+use criterion::{Criterion, criterion_group, criterion_main};
+use rand::RngCore;
+use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
-use std::collections::BTreeMap;
 
-fn bench_lookups(c: &mut Criterion) {
-    let mut trie = TrieMap::new();
-    let mut btree = BTreeMap::new();
-    let mut rng = StdRng::seed_from_u64(42);
-    let mut keys = Vec::new();
+const COUNT: usize = 5_000;
+const LEN: usize = 16;
+const SEED: u64 = 42;
 
-    for _ in 0..1000 {
-        let mut key = vec![0u8; 16];
-        rng.fill_bytes(&mut key);
-        trie.insert(&key, 0usize);
-        btree.insert(key.clone(), 0usize);
-        keys.push(key);
-    }
-
-    let mut group = c.benchmark_group("Lookup");
-    group.bench_function("TrieMap", |b| {
-        b.iter(|| {
-            for key in &keys {
-                black_box(trie.get(key));
-            }
+fn generate_random_keys(count: usize, len: usize) -> Vec<Vec<u8>> {
+    let mut rng = StdRng::seed_from_u64(SEED);
+    (0..count)
+        .map(|_| {
+            let mut key = vec![0u8; len];
+            rng.fill_bytes(&mut key);
+            key
         })
-    });
-    group.bench_function("BTreeMap", |b| {
-        b.iter(|| {
-            for key in &keys {
-                black_box(btree.get(key));
-            }
-        })
-    });
-    group.finish();
+        .collect()
 }
 
-fn bench_inserts(c: &mut Criterion) {
-    let mut rng = StdRng::seed_from_u64(42);
-    let mut keys = Vec::new();
-    for _ in 0..1000 {
-        let mut key = vec![0u8; 16];
-        rng.fill_bytes(&mut key);
-        keys.push(key);
-    }
-
-    let mut group = c.benchmark_group("Insert");
-    group.bench_function("TrieMap", |b| {
-        b.iter(|| {
-            let mut trie = TrieMap::new();
-            for key in &keys {
-                trie.insert(key, 0usize);
-            }
-        })
-    });
-    group.bench_function("BTreeMap", |b| {
-        b.iter(|| {
-            let mut btree = BTreeMap::new();
-            for key in &keys {
-                btree.insert(key.clone(), 0usize);
-            }
-        })
-    });
-    group.finish();
+// benchmark insertion and lookup perf for seeded random inputs.
+fn bench_random(c: &mut Criterion) {
+    let keys = generate_random_keys(COUNT, LEN);
+    bench_lookups(c, "Random-Lookup", &keys);
+    bench_inserts(c, "Random-Insert", &keys);
 }
 
-criterion_group!(benches, bench_lookups, bench_inserts);
+criterion_group!(benches, bench_random);
 criterion_main!(benches);
