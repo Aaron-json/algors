@@ -1,22 +1,10 @@
 use crate::hash::Hasher;
-use core::mem;
-use core::{error, fmt};
 
 type BitsType = u64;
 
 /// This implementation of the bloom filter uses ideas from the paper at
 /// `https://doi.org/10.1002/rsa.20208 Digital Object Identifier (DOI)``
 /// by Adam Kirsch and Michael Mitzenmacher.
-///
-/// # Serialization
-/// The serialization format is as below:
-/// [16 bytes] magic
-/// [1 byte]  version
-/// [4 bytes] hash_num: u32 LE
-/// [4 bytes] hasher_len: u32 LE
-/// [N bytes] hasher_data
-/// [8 bytes] bits_num: u64 LE
-/// [M bytes] bits_data
 #[derive(Debug)]
 pub struct Bloom<T: Hasher> {
     bits: Box<[BitsType]>,
@@ -25,32 +13,6 @@ pub struct Bloom<T: Hasher> {
     hash_num: u32,
     hasher: T,
 }
-
-#[derive(Debug)]
-pub enum DeserializeError<E> {
-    InvalidMagic,
-    InvalidVersion,
-    HasherError(E),
-    BufferTooShort { need: usize, have: usize },
-}
-
-impl<E: fmt::Display> fmt::Display for DeserializeError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidMagic => write!(f, "invalid magic string"),
-            Self::InvalidVersion => write!(f, "unsupported version"),
-            Self::HasherError(e) => write!(f, "hasher error: {}", e),
-            Self::BufferTooShort { need, have } => {
-                write!(f, "buffer too short; need {} bytes, have {}", need, have)
-            }
-        }
-    }
-}
-
-impl<E: fmt::Debug + fmt::Display> error::Error for DeserializeError<E> {}
-
-const MAGIC: &[u8; 16] = b"BloomFile\x00\x00\x00\x00\x00\x00\x00";
-const VERSION: u8 = 1;
 
 impl<T: Hasher> Bloom<T> {
     /// Rounds float to the next multiple of the `BitsType` bit width.
@@ -207,110 +169,5 @@ impl<T: Hasher> Bloom<T> {
     /// Returns the total number of bits in the filter.
     pub fn bits_num(&self) -> u64 {
         self.bits_num
-    }
-
-    pub fn serialize(&self) -> Result<Box<[u8]>, T::SerializeError> {
-        let hasher_bytes = self.hasher.serialize()?;
-        assert!(
-            hasher_bytes.len() as u64 <= u32::MAX as u64,
-            "Serialized hasher must be <= u32::MAX"
-        );
-        // magic + version + hash_num + hasher_len + hasher + bits_num + bits
-        let bits_len = self.bits.len() * mem::size_of::<BitsType>();
-        let total_len: usize = MAGIC.len() + 1 + 4 + 4 + hasher_bytes.len() + 8 + bits_len;
-
-        let mut buf = Vec::with_capacity(total_len);
-
-        buf.extend_from_slice(MAGIC);
-        buf.push(VERSION);
-
-        // hasher
-        buf.extend_from_slice(&self.hash_num.to_le_bytes());
-        buf.extend_from_slice(&(hasher_bytes.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&hasher_bytes);
-
-        // data
-        buf.extend_from_slice(&self.bits_num.to_le_bytes());
-
-        for &word in self.bits.iter() {
-            buf.extend_from_slice(&word.to_le_bytes());
-        }
-
-        Ok(buf.into_boxed_slice())
-    }
-
-    pub fn deserialize<R>(serialized: R) -> Result<Self, DeserializeError<T::DeserializeError>>
-    where
-        R: AsRef<[u8]>,
-    {
-        let buf = serialized.as_ref();
-        let mut pos = 0;
-
-        macro_rules! read {
-            ($n:expr) => {{
-                let end = pos + $n;
-                if end > buf.len() {
-                    return Err(DeserializeError::BufferTooShort {
-                        need: end,
-                        have: buf.len(),
-                    });
-                }
-                let slice = &buf[pos..end];
-                pos = end;
-                slice
-            }};
-        }
-
-        if read!(MAGIC.len()) != MAGIC {
-            return Err(DeserializeError::InvalidMagic);
-        }
-
-        if read!(1)[0] != VERSION {
-            return Err(DeserializeError::InvalidVersion);
-        }
-
-        // hasher
-        let hasher_num = u32::from_le_bytes(read!(4).try_into().unwrap());
-        let hasher_bytes_len = u32::from_le_bytes(read!(4).try_into().unwrap());
-        let hasher_bytes = read!(hasher_bytes_len as usize);
-        let hasher =
-            T::from_serialized(hasher_bytes).map_err(|e| DeserializeError::HasherError(e))?;
-
-        // bits
-        let bits_num = u64::from_le_bytes(read!(8).try_into().unwrap());
-
-        // We expect bits_num to be a multiple of BitsType::BITS (64) because
-        // it is rounded up during creation
-        if bits_num == 0 || bits_num % BitsType::BITS as u64 != 0 {
-            return Err(DeserializeError::BufferTooShort {
-                // This is a bit of a hack to mean invalid data since we don't
-                // have a dedicated "InvalidData" error
-                need: pos + ((bits_num + 63) / 64 * 8) as usize,
-                have: buf.len(),
-            });
-        }
-
-        let elem_size = mem::size_of::<BitsType>();
-        let remaining = buf.len() - pos;
-        let expected_rem_size = (bits_num / BitsType::BITS as u64) * elem_size as u64;
-
-        if remaining as u64 != expected_rem_size {
-            return Err(DeserializeError::BufferTooShort {
-                need: pos + expected_rem_size as usize,
-                have: buf.len(),
-            });
-        }
-
-        let mut bits_buf: Vec<BitsType> = vec![0; remaining / elem_size];
-        for word in bits_buf.iter_mut() {
-            *word = u64::from_le_bytes(read!(elem_size).try_into().unwrap());
-        }
-
-        Ok(Bloom {
-            bits: bits_buf.into_boxed_slice(),
-            bits_num,
-            hash_num: hasher_num,
-            hasher,
-        })
     }
 }
