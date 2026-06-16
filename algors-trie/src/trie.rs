@@ -1,7 +1,6 @@
 use crate::node::{ChildPos, Node};
 use crate::prefix::Prefix;
 use crate::util;
-use core::mem;
 
 pub struct TrieMap<T> {
     root: Option<Node<T>>,
@@ -245,19 +244,26 @@ impl<T> TrieMap<T> {
             }
         };
 
-        let Some((term_node, match_len)) = res else {
-            // no value existed for this prefix which means it is only a branching
-            // node and contains no value. There's no need to compress here
+        let Some(_) = res else {
+            // prefix does not exist
             return;
         };
 
-        // replace with a dummy node that will be removed during
-        // compression
-        let new = Node::new(&term_node.prefix().as_ref()[0..match_len]);
-        let old = mem::replace(term_node, new);
-        drop(old);
-
-        Self::compress(&mut self.root, visited);
+        // the node terminating the prefix becomes unnecessary. Removing it
+        // during compression requires having a valid dummy node which
+        // costs an allocation.
+        // Instead, we manually remove the node from the its parent.
+        if let Some((term_parent, child_pos)) = visited.pop() {
+            let parent_ref;
+            unsafe {
+                parent_ref = &mut *term_parent;
+            }
+            let removed = parent_ref.remove_child(child_pos);
+            drop(removed);
+            Self::compress(&mut self.root, visited);
+        } else {
+            self.root = None;
+        };
     }
 
     /// Runs the given operation once for every value with the given prefix.
