@@ -64,6 +64,31 @@ fn test_prefix_ops() {
 }
 
 #[test]
+fn test_remove_prefix() {
+    let mut trie = TrieMap::new();
+    let keys = ["app", "apple", "apply", "apt", "bat", "bath"];
+    for (i, key) in keys.iter().enumerate() {
+        trie.insert(key, i);
+    }
+
+    trie.remove_prefix("app");
+
+    // All "app" prefixed keys should be gone
+    assert!(!trie.contains("app"));
+    assert!(!trie.contains("apple"));
+    assert!(!trie.contains("apply"));
+
+    // "apt" shares "ap" with "app" but does not have prefix "app"
+    assert!(trie.contains("apt"));
+    assert!(trie.contains("bat"));
+    assert!(trie.contains("bath"));
+
+    // Remove empty prefix should clear the trie
+    trie.remove_prefix("");
+    assert!(trie.is_empty());
+}
+
+#[test]
 fn test_compression_and_splitting() {
     let mut trie = TrieMap::new();
 

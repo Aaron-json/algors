@@ -1,6 +1,8 @@
 mod common;
 
-use common::{TrackingAllocator, bench_inserts, bench_lookups, compare_memory};
+use common::{
+    TrackingAllocator, bench_inserts, bench_lookups, bench_remove_prefix, compare_memory,
+};
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::fs;
 use std::path::PathBuf;
@@ -50,6 +52,10 @@ fn bench_path(c: &mut Criterion) {
 
     bench_lookups(c, "Path-Lookup", &paths);
     bench_inserts(c, "Path-Insert", &paths);
+
+    // benchmark dropping the entire root directory (all 500k files)
+    let root_prefix = std::env::var("HOME").unwrap_or_else(|_| "/".to_string()) + "/";
+    bench_remove_prefix(c, "Path-RemoveRoot", &paths, &[root_prefix]);
 }
 
 criterion_group!(benches, bench_path);

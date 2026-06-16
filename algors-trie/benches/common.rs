@@ -175,3 +175,29 @@ where
     });
     group.finish();
 }
+
+/// Benchmark for prefix removal operations.
+pub fn bench_remove_prefix<K>(c: &mut Criterion, group_name: &str, keys: &[K], prefixes: &[K])
+where
+    K: AsRef<[u8]> + Clone + Ord,
+{
+    let mut group = c.benchmark_group(group_name);
+    group.bench_function("TrieMap", |b| {
+        b.iter_batched(
+            || {
+                let mut trie = TrieMap::new();
+                for key in keys {
+                    trie.insert(key, 0usize);
+                }
+                trie
+            },
+            |mut trie| {
+                for prefix in prefixes {
+                    black_box(trie.remove_prefix(prefix));
+                }
+            },
+            BatchSize::LargeInput,
+        )
+    });
+    group.finish();
+}
