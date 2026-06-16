@@ -68,7 +68,7 @@ impl<T> Node<T> {
         Self::new_leaf(prefix, None)
     }
 
-    pub fn new_leaf(prefix: &[u8], val: Option<T>) -> Self {
+    fn new_leaf(prefix: &[u8], val: Option<T>) -> Self {
         let has_val = val.is_some();
         let node = LeafNode {
             header: Header {
@@ -101,7 +101,7 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn new_internal(prefix: &[u8], val: Option<T>) -> Self {
+    fn new_internal(prefix: &[u8], val: Option<T>) -> Self {
         let has_val = val.is_some();
         let node = InternalNode {
             header: Header {

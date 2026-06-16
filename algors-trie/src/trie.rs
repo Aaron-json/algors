@@ -1,6 +1,7 @@
 use crate::node::{ChildPos, Node};
 use crate::prefix::Prefix;
 use crate::util;
+use core::mem;
 
 pub struct TrieMap<T> {
     root: Option<Node<T>>,
@@ -84,40 +85,7 @@ impl<T> TrieMap<T> {
         }
     }
 
-    pub fn remove<R>(&mut self, key: R) -> Option<T>
-    where
-        R: AsRef<[u8]>,
-    {
-        let key_ref = key.as_ref();
-        if key_ref.is_empty() || self.root.is_none() {
-            return None;
-        }
-
-        let mut cur_node = self.root.as_mut().unwrap();
-        let mut cur_data = key_ref;
-        let mut visited: Vec<(*mut Node<T>, ChildPos)> = Vec::with_capacity(8);
-        let res: Option<T> = loop {
-            let lcp_len = util::lcp(cur_node.prefix().as_ref(), cur_data);
-            if lcp_len < cur_node.prefix().len() {
-                return None;
-            }
-            if lcp_len == cur_data.len() {
-                break cur_node.take_val();
-            }
-            cur_data = &cur_data[lcp_len..];
-            let next_pos = Node::<T>::child_pos_from_byte(cur_data[0]);
-            if cur_node.child_exists(next_pos) {
-                visited.push((cur_node, next_pos));
-                cur_node = cur_node.get_mut_child_by_pos(next_pos).unwrap();
-            } else {
-                return None;
-            }
-        };
-
-        if res.is_none() {
-            return res;
-        }
-
+    pub fn compress(root: &mut Option<Node<T>>, visited: Vec<(*mut Node<T>, ChildPos)>) {
         // backtrack and compress previous nodes if necessary
         for cur in visited.into_iter().rev() {
             let parent: &mut Node<T>;
@@ -152,21 +120,58 @@ impl<T> TrieMap<T> {
             }
         }
         // root node has to be compressed manually since it has no parent.
-        if let Some(root) = self.root.as_mut()
-            && !root.has_val()
+        if let Some(_root) = root.as_mut()
+            && !_root.has_val()
         {
-            let count = root.len_children();
+            let count = _root.len_children();
             if count == 0 {
-                self.root = None;
+                *root = None;
             } else if count == 1 {
                 // make the child the new root
-                let mut child = root.remove_child(root.child_pos_from_idx(0)).unwrap();
+                let mut child = _root.remove_child(_root.child_pos_from_idx(0)).unwrap();
                 *child.prefix_mut() =
-                    Prefix::from_slices(&[root.prefix().as_ref(), child.prefix().as_ref()]);
-                self.root = Some(child);
+                    Prefix::from_slices(&[_root.prefix().as_ref(), child.prefix().as_ref()]);
+                *root = Some(child);
             }
         }
+    }
 
+    pub fn remove<R>(&mut self, key: R) -> Option<T>
+    where
+        R: AsRef<[u8]>,
+    {
+        let key_ref = key.as_ref();
+        if key_ref.is_empty() || self.root.is_none() {
+            return None;
+        }
+
+        let mut cur_node = self.root.as_mut().unwrap();
+        let mut cur_data = key_ref;
+        let mut visited: Vec<(*mut Node<T>, ChildPos)> = Vec::with_capacity(8);
+        let res: Option<T> = loop {
+            let lcp_len = util::lcp(cur_node.prefix().as_ref(), cur_data);
+            if lcp_len < cur_node.prefix().len() {
+                return None;
+            }
+            if lcp_len == cur_data.len() {
+                break cur_node.take_val();
+            }
+            cur_data = &cur_data[lcp_len..];
+            let next_pos = Node::<T>::child_pos_from_byte(cur_data[0]);
+            if cur_node.child_exists(next_pos) {
+                visited.push((cur_node, next_pos));
+                cur_node = cur_node.get_mut_child_by_pos(next_pos).unwrap();
+            } else {
+                return None;
+            }
+        };
+
+        // no value existed for this prefix which means it is only a branching
+        // node and contains no value. There's no need to compress here
+        if res.is_none() {
+            return res;
+        }
+        Self::compress(&mut self.root, visited);
         res
     }
 
@@ -204,6 +209,55 @@ impl<T> TrieMap<T> {
                 return None;
             }
         }
+    }
+
+    pub fn remove_prefix<R>(&mut self, prefix: R)
+    where
+        R: AsRef<[u8]>,
+    {
+        let key_ref = prefix.as_ref();
+        if key_ref.is_empty() {
+            self.root = None;
+            return;
+        }
+        if self.root.is_none() {
+            return;
+        }
+
+        let mut cur_node = self.root.as_mut().unwrap();
+        let mut rem_pref = key_ref;
+        let mut visited: Vec<(*mut Node<T>, ChildPos)> = Vec::with_capacity(8);
+        let res: Option<(&mut Node<T>, usize)> = loop {
+            let lcp_len = util::lcp(cur_node.prefix().as_ref(), rem_pref);
+            if lcp_len == rem_pref.len() {
+                break Some((cur_node, lcp_len));
+            }
+            if lcp_len < cur_node.prefix().len() {
+                break None;
+            }
+            rem_pref = &rem_pref[lcp_len..];
+            let next_pos = Node::<T>::child_pos_from_byte(rem_pref[0]);
+            if cur_node.child_exists(next_pos) {
+                visited.push((cur_node, next_pos));
+                cur_node = cur_node.get_mut_child_by_pos(next_pos).unwrap();
+            } else {
+                break None;
+            }
+        };
+
+        let Some((term_node, match_len)) = res else {
+            // no value existed for this prefix which means it is only a branching
+            // node and contains no value. There's no need to compress here
+            return;
+        };
+
+        // replace with a dummy node that will be removed during
+        // compression
+        let new = Node::new(&term_node.prefix().as_ref()[0..match_len]);
+        let old = mem::replace(term_node, new);
+        drop(old);
+
+        Self::compress(&mut self.root, visited);
     }
 
     /// Runs the given operation once for every value with the given prefix.
