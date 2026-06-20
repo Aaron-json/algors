@@ -101,40 +101,6 @@ impl<T> Node<T> {
         }
     }
 
-    fn new_internal(prefix: &[u8], val: Option<T>) -> Self {
-        let has_val = val.is_some();
-        let node = InternalNode {
-            header: Header {
-                prefix: Prefix::new(prefix),
-                val: if let Some(v) = val {
-                    MaybeUninit::new(v)
-                } else {
-                    MaybeUninit::uninit()
-                },
-            },
-            bitmap: [0; 4],
-            children: util::BoundedRawVec::new(),
-        };
-        let layout = Layout::new::<InternalNode<T>>()
-            .align_to(NODE_ALLOC_ALIGN)
-            .unwrap();
-        unsafe {
-            let ptr = alloc(layout) as *mut InternalNode<T>;
-            if ptr.is_null() {
-                alloc::alloc::handle_alloc_error(layout);
-            }
-            ptr::write(ptr, node);
-            let mut ptr_val = ptr as usize;
-            if has_val {
-                ptr_val |= VAL_TAG;
-            }
-            Self {
-                ptr: ptr_val,
-                _marker: PhantomData,
-            }
-        }
-    }
-
     #[inline(always)]
     pub fn is_leaf(&self) -> bool {
         (self.ptr & LEAF_TAG) != 0
@@ -429,7 +395,7 @@ impl<T> Drop for Node<T> {
         let header_ptr = self.as_header();
         unsafe {
             if has_val {
-                (*header_ptr).val.as_mut_ptr().drop_in_place();
+                (*header_ptr).val.assume_init_drop();
             }
             // Drop prefix (works for both since it's in the header)
             ptr::drop_in_place(&mut (*header_ptr).prefix);
