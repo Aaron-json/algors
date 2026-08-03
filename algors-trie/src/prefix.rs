@@ -7,17 +7,20 @@ use core::{mem, ptr, slice};
 const PREFIX_SIZE: usize = 16;
 const INLINE_CAP: usize = PREFIX_SIZE - 1;
 const PTR_SIZE: usize = mem::size_of::<*const u8>();
-const USIZE_SIZE: usize = mem::size_of::<usize>();
+const ALLOC_LEN_SIZE: usize = mem::size_of::<u32>();
 
-// Index of the byte that stores the tag (length when inlining).
-// Must overlap with the pointer's Least significant Byte.
-const TAG_LEN_BYTE: usize = if cfg!(target_endian = "little") {
+// This is the only offset that can be used by both the inlined and allocating
+// variants. Specifically, only the tag BIT can be read by both variants.
+// This byte MUST overlap with the pointer's Least significant Byte.
+const INLINE_TAG_LEN_BYTE: usize = if cfg!(target_endian = "little") {
     0
 } else {
     PREFIX_SIZE - 1
 };
 
-const POINTER_OFFSET: usize = if cfg!(target_endian = "little") {
+const INLINE_DATA: usize = if cfg!(target_endian = "little") { 1 } else { 0 };
+
+const ALLOC_DATA_PTR: usize = if cfg!(target_endian = "little") {
     0
 } else {
     PREFIX_SIZE - PTR_SIZE
@@ -26,17 +29,27 @@ const POINTER_OFFSET: usize = if cfg!(target_endian = "little") {
 // Only used in the non inlined variant.
 // When data is inlined, the length is packed into the tag byte
 // to maximize space for inlining.
-const ALLOC_LEN_OFFSET: usize = if cfg!(target_endian = "little") {
+const ALLOC_LEN: usize = if cfg!(target_endian = "little") {
     PTR_SIZE
 } else {
-    PREFIX_SIZE - PTR_SIZE - USIZE_SIZE
+    PREFIX_SIZE - PTR_SIZE - ALLOC_LEN_SIZE
 };
 
-// Obviously only used when the prefix is inlined.
-const INLINE_DATA_OFFSET: usize = if cfg!(target_endian = "little") { 1 } else { 0 };
+const ALLOC_FIRST_BYTE: usize = if cfg!(target_endian = "little") {
+    PTR_SIZE + ALLOC_LEN_SIZE
+} else {
+    PREFIX_SIZE - PTR_SIZE - ALLOC_LEN_SIZE - 1
+};
 
-/// A compact prefix that avoids heap allocations for small prefixes.
-/// Small prefixes are stored inline and larger ones are heap allocated
+/// Compact owned prefix with a 16-byte representation.
+///
+/// ```text
+/// 64-bit layout, low address on the left:
+/// LE inline  [ tag + len: 1 | data: 15 ]
+/// BE inline  [ data: 15 | tag + len: 1 ]
+/// LE heap    [ pointer: 8 | len: 4 | first: 1 | unused: 3 ]
+/// BE heap    [ unused: 3 | first: 1 | len: 4 | pointer: 8 ]
+/// ```
 pub struct Prefix {
     // Forces alignment to the native pointer size to avoid
     // unaligned accesses at runtime which might be slower
@@ -53,15 +66,16 @@ impl Prefix {
         };
         let len = data.len();
         if len <= INLINE_CAP {
-            res.bytes[TAG_LEN_BYTE] = ((len << 1) as u8) | 0x1;
+            res.bytes[INLINE_TAG_LEN_BYTE] = ((len << 1) as u8) | 0x1;
             unsafe {
                 ptr::copy_nonoverlapping(
                     data.as_ptr(),
-                    res.bytes.as_mut_ptr().add(INLINE_DATA_OFFSET),
+                    res.bytes.as_mut_ptr().add(INLINE_DATA),
                     len,
                 );
             };
         } else {
+            let stored_len = u32::try_from(len).expect("Prefix length exceeds u32::MAX");
             unsafe {
                 // Aligning by 2 bytes lets us use the last bit as the tag.
                 let layout = alloc::Layout::from_size_align(len, 2)
@@ -73,11 +87,12 @@ impl Prefix {
                 }
                 ptr::copy_nonoverlapping(data.as_ptr(), pt, len);
                 ptr::write_unaligned(
-                    res.bytes.as_mut_ptr().add(ALLOC_LEN_OFFSET) as *mut usize,
-                    len,
+                    res.bytes.as_mut_ptr().add(ALLOC_LEN) as *mut u32,
+                    stored_len,
                 );
+                res.bytes[ALLOC_FIRST_BYTE] = data[0];
                 ptr::write_unaligned(
-                    res.bytes.as_mut_ptr().add(POINTER_OFFSET) as *mut *mut u8,
+                    res.bytes.as_mut_ptr().add(ALLOC_DATA_PTR) as *mut *mut u8,
                     pt,
                 );
             }
@@ -94,7 +109,7 @@ impl Prefix {
         };
 
         if total_len <= INLINE_CAP {
-            res.bytes[TAG_LEN_BYTE] = ((total_len << 1) as u8) | 0x1;
+            res.bytes[INLINE_TAG_LEN_BYTE] = ((total_len << 1) as u8) | 0x1;
             let mut i = 0;
             for slice in slices.iter() {
                 // we are certain the memory is not overlapping since we
@@ -103,13 +118,14 @@ impl Prefix {
                 unsafe {
                     res.bytes
                         .as_mut_ptr()
-                        .add(INLINE_DATA_OFFSET)
+                        .add(INLINE_DATA)
                         .add(i)
                         .copy_from_nonoverlapping(slice.as_ptr(), slice_len);
                 }
                 i += slice_len;
             }
         } else {
+            let stored_len = u32::try_from(total_len).expect("Prefix length exceeds u32::MAX");
             unsafe {
                 // Aligning by 2 bytes lets us use the last bit as the tag.
                 let layout = alloc::Layout::from_size_align(total_len, 2)
@@ -130,11 +146,16 @@ impl Prefix {
                     i += slice_len;
                 }
                 ptr::write_unaligned(
-                    res.bytes.as_mut_ptr().add(ALLOC_LEN_OFFSET) as *mut usize,
-                    total_len,
+                    res.bytes.as_mut_ptr().add(ALLOC_LEN) as *mut u32,
+                    stored_len,
                 );
+                res.bytes[ALLOC_FIRST_BYTE] = slices
+                    .iter()
+                    .find_map(|slice| slice.first())
+                    .copied()
+                    .expect("A non-empty prefix must contain a first byte");
                 ptr::write_unaligned(
-                    res.bytes.as_mut_ptr().add(POINTER_OFFSET) as *mut *mut u8,
+                    res.bytes.as_mut_ptr().add(ALLOC_DATA_PTR) as *mut *mut u8,
                     pt,
                 );
             }
@@ -144,24 +165,24 @@ impl Prefix {
 
     #[inline(always)]
     pub fn is_inline(&self) -> bool {
-        (self.bytes[TAG_LEN_BYTE] & 0x1) == 1
+        (self.bytes[INLINE_TAG_LEN_BYTE] & 0x1) == 1
     }
 
     #[inline(always)]
     fn len_inline(&self) -> usize {
-        (self.bytes[TAG_LEN_BYTE] >> 1) as usize
+        (self.bytes[INLINE_TAG_LEN_BYTE] >> 1) as usize
     }
 
     #[inline(always)]
     fn len_alloc(&self) -> usize {
-        unsafe { (self.bytes.as_ptr().add(ALLOC_LEN_OFFSET) as *const usize).read_unaligned() }
+        unsafe { (self.bytes.as_ptr().add(ALLOC_LEN) as *const u32).read_unaligned() as usize }
     }
 
     /// Returns the pointer to the heap allocated data.
     /// This can ONLY be called if this is the heap allocated variant.
     #[inline(always)]
     fn ptr_alloc(&self) -> *mut u8 {
-        unsafe { (self.bytes.as_ptr().add(POINTER_OFFSET) as *const *mut u8).read_unaligned() }
+        unsafe { (self.bytes.as_ptr().add(ALLOC_DATA_PTR) as *const *mut u8).read_unaligned() }
     }
 
     #[inline(always)]
@@ -174,11 +195,21 @@ impl Prefix {
     }
 
     #[inline(always)]
+    pub fn first_byte(&self) -> u8 {
+        debug_assert!(self.len() > 0, "Prefix cannot be empty");
+        if self.is_inline() {
+            self.bytes[INLINE_DATA]
+        } else {
+            self.bytes[ALLOC_FIRST_BYTE]
+        }
+    }
+
+    #[inline(always)]
     pub fn as_ref(&self) -> &[u8] {
         unsafe {
             if self.is_inline() {
                 let len = self.len_inline();
-                &self.bytes[INLINE_DATA_OFFSET..INLINE_DATA_OFFSET + len]
+                &self.bytes[INLINE_DATA..INLINE_DATA + len]
             } else {
                 slice::from_raw_parts(self.ptr_alloc(), self.len_alloc())
             }

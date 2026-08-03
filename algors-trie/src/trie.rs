@@ -57,7 +57,7 @@ impl<T> TrieMap<T> {
                 cur_node.transfer_children(&mut split_node);
 
                 // update the parent
-                let split_node_byte = split_node.prefix().as_ref()[0];
+                let split_node_byte = split_node.prefix().first_byte();
 
                 // we just split the node so it has no children
                 cur_node.insert_child(Node::<T>::child_pos_from_byte(split_node_byte), split_node);

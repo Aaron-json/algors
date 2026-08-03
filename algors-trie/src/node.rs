@@ -210,11 +210,8 @@ impl<T> Node<T> {
     /// Given a child index, it returns its position in the bitmap.
     #[inline]
     pub fn child_pos_from_idx(&self, idx: usize) -> ChildPos {
-        // NOTE: This is a hacky/easy wat to do this. It does a memory
-        // read to get the first which could cause a chache miss. Most of the
-        // time the prefix should be inlined and the value in cache.
         let child = self.get_child_by_idx(idx).expect("Index out of bounds");
-        Self::child_pos_from_byte(child.prefix().as_ref()[0])
+        Self::child_pos_from_byte(child.prefix().first_byte())
     }
 
     /// Returns the index of the child, if exists, given the child's expected
