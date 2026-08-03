@@ -361,6 +361,12 @@ impl<T> Node<T> {
         other.upgrade_to_internal();
         let this = unsafe { &mut *self.as_internal_ptr() };
         let that = unsafe { &mut *other.as_internal_ptr() };
+
+        // BoundedRawVec must be freed manually. Release the destination
+        // buffer before overwriting it.
+        let that_len = that.len_children();
+        that.children.deallocate(that_len);
+
         that.children = mem::take(&mut this.children);
         that.bitmap = this.bitmap;
         this.bitmap = [0u64; 4];

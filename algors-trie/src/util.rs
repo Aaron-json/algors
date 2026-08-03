@@ -226,6 +226,17 @@ impl<T> BoundedRawVec<T> {
     }
 }
 
+impl<T> Drop for BoundedRawVec<T> {
+    fn drop(&mut self) {
+        // This is best effort assertion to catch missing deallocations.
+        // It is not guaranteed to catch all leaks. For example, ZSTs do not
+        // change the capacity so this assertion cannot handle ZSTs.
+        if !Self::is_zst() {
+            debug_assert_eq!(self.tagged, 0, "BoundedRawVec dropped without deallocating")
+        }
+    }
+}
+
 /// Immutable iterator over BoundedRawVec.
 pub struct Iter<'a, T> {
     ptr: *const T,
