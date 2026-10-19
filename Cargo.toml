@@ -2,8 +2,7 @@
 members = [
     "algors-utils",
     "algors-queue",
-    "algors-bloom",
     "algors-union-find",
-    "algors-trie",
+    "algors-trie", "algors-heap",
 ]
 resolver = "2"
